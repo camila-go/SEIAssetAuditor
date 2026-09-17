@@ -6,7 +6,7 @@ plus a public video intake flow with legal and marketing approval.
 Built to PRD v1.5. See [`PRD.md`](./PRD.md) and the conventions in
 [`.claude/rules/`](./.claude/rules/).
 
-> **Status: running and verified locally.** Type-checks clean, 215 tests pass,
+> **Status: running and verified locally.** Type-checks clean, 218 tests pass,
 > and a real audit has scraped live capella.edu pages end to end. See
 > [What has actually been verified](#what-has-actually-been-verified) for the
 > exact list, and [What has not](#what-has-not-been-verified) for the gaps.
@@ -240,7 +240,7 @@ Run locally against real PostgreSQL 17, Redis 8, and the live capella.edu site.
 
 - `tsc --build` across all seven projects: **zero errors**.
 - `eslint`: **clean**.
-- `jest`: **215 tests, 13 suites, all passing**.
+- `jest`: **218 tests, 13 suites, all passing**.
 - Prisma migration applied to a real PostgreSQL database; seed script runs.
 - API, worker and UI all boot; `/health` reports the phase flags.
 - **A real audit ran end to end**: 3 URLs enqueued → BullMQ → worker →

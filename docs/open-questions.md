@@ -274,3 +274,39 @@ would ever have flagged that: the row looks fine and simply never matches.
 block, a data attribute holding a serialized payload). One reference on this
 page falls in that bucket. Worth revisiting if a specific asset turns up missing;
 parsing arbitrary JS for paths guesses more than it knows.
+
+
+## Duplicate detection was reporting ten brands as one image (found 2026-09-17)
+
+Running the pHash sweep over the newly-discovered assets produced a "duplicate"
+group containing the JWMI, Strayer, Devmountain, Sophia, SEI, ETS, Torrens,
+Media Design School and DegreesWork logos — nine different brands, at Hamming
+distance 0, the strongest possible match.
+
+Cause: a white logo on a transparent background, flattened onto white, is a
+blank white square. blockhash returns all-ones for it. Every such logo therefore
+carried the identical hash `ffff…`.
+
+The dual-hash design (white-flattened and black-flattened) was already there and
+was already correct — the black-flattened hashes of those same logos are fully
+distinctive. What was missing was the rule that **a uniform hash carries no
+information and must not be used for matching**. A hash whose every bit is the
+same is now discarded.
+
+Two things this changed downstream:
+
+- An image that is a single flat colour now has no usable hash at all, so it is
+  reported as uncovered rather than matching the entire index. Reverse image
+  search rejects such an upload with an explanation instead of returning
+  everything.
+- Coverage counts an image as searchable if **either** hash survives. Counting
+  only the primary hash reported 46 of 58 when 56 were findable — understating
+  coverage is as misleading as overstating it, just in the safer direction.
+
+After the fix the index reports one duplicate group: `apple-icon-167x167.png`
+and `apple-icon-180x180.png`, which genuinely are the same icon at two sizes.
+
+This is the third instance of the same failure shape in this tool — confident,
+plausible-looking output built on an input that silently carried no signal. The
+other two were the all-assets semantic match ("capella logo" matching the entire
+DAM because every asset is a Capella asset) and the narrow DAM root.
