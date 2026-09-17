@@ -1,0 +1,26 @@
+{
+  "name": "@capella/db",
+  "version": "1.5.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "prisma generate && tsc --build",
+    "postinstall": "prisma generate"
+  },
+  "dependencies": {
+    "@capella/types": "*",
+    "@prisma/client": "^5.15.0",
+    "@capella/embedding": "*"
+  },
+  "devDependencies": {
+    "prisma": "^5.15.0"
+  }
+}

@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-ink-50 text-ink-900 antialiased;
+  }
+
+  /* Keyboard focus must stay visible — approvers work through this UI by tab. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand-600 ring-offset-2;
+  }
+
+  mark {
+    @apply bg-caution-200 text-ink-900;
+  }
+}
+
+@layer components {
+  /**
+   * One select style for the whole tool.
+   *
+   * There were five near-identical variants (px-2 vs px-3, py-1 vs py-2), which
+   * is how the same control ended up a different height on different pages.
+   *
+   * The native arrow sits hard against the right border and its inset is not
+   * styleable, so the chevron is drawn here instead: `appearance-none` plus a
+   * background SVG at a fixed 12px from the edge, with 36px of right padding so
+   * a long option label can never run underneath it. Sizes are on the 4pt grid.
+   */
+  .select-field {
+    @apply w-full appearance-none rounded-md border border-ink-300 bg-white py-2 pl-3 text-sm text-ink-900;
+
+    padding-right: 36px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23596579' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 16px 16px;
+  }
+
+  /* Windows/Edge draws its own arrow on top of the background image. */
+  .select-field::-ms-expand {
+    display: none;
+  }
+
+  /**
+   * Asset preview surface.
+   *
+   * `object-contain`, never `cover`: this is an audit tool, so the whole asset
+   * has to be visible. Cropping a logo to fill a tile hides exactly the detail
+   * someone is checking — and it silently misrepresents the asset's aspect ratio.
+   *
+   * The checkerboard is not decoration. A large share of this DAM is white
+   * logos on transparent backgrounds (DegreesWork_horizontal_White.png,
+   * JWMI_logo_horizontal_white.png, ETS_Workfoce-Edge_2024_Primary_White.svg …).
+   * On the flat light-grey these tiles used to use, those are invisible — they
+   * only appeared at all because `cover` zoomed them past the edges. Against
+   * alternating white and ink-300 squares a white asset reads clearly, and the
+   * pattern doubles as the standard "this has transparency" signal.
+   */
+  .asset-preview {
+    object-fit: contain;
+
+    background-color: #fff;
+    background-image:
+      linear-gradient(
+        45deg,
+        theme('colors.ink.200') 25%,
+        transparent 25%,
+        transparent 75%,
+        theme('colors.ink.200') 75%
+      ),
+      linear-gradient(
+        45deg,
+        theme('colors.ink.200') 25%,
+        transparent 25%,
+        transparent 75%,
+        theme('colors.ink.200') 75%
+      );
+    background-size: 12px 12px;
+    background-position:
+      0 0,
+      6px 6px;
+  }
+}

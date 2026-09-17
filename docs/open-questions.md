@@ -1,0 +1,276 @@
+# Open Questions — and how the code handles each one today
+
+From PRD v1.5 §11. Every blocking question has a defensible default in the code
+so the build is not stalled, but each default is a placeholder, not a decision.
+
+## Blocking
+
+| Question | Owner | What the code does now | Where to change it |
+|---|---|---|---|
+| Sequential or parallel approval chain? | Legal + Marketing | **Both are implemented.** `APPROVAL_CHAIN_MODE` switches between them; defaults to `sequential`. | `apps/api/src/services/approvalChain.ts` — pure and fully unit-tested for both modes |
+| Who are the named legal approvers? | Legal | Single address in `LEGAL_APPROVER_EMAIL`. Any approver presenting valid credentials can act as "legal". | `notificationService.approverEmailFor()`; per-person identity needs the SSO answer below |
+| Who are the named marketing approvers? | Marketing | Single address in `MARKETING_APPROVER_EMAIL`. | Same |
+| Does approval auto-make the asset usable, or does an author still place it? | Content | **Approval moves the asset into the live DAM and stops.** Nothing is published; the approval email says so explicitly. | `intakeService.promoteToLiveDam()` |
+| Should internal submitters require Capella SSO? | IT / Security | Placeholder: shared bearer token + an `X-Approver-Email` header, held in `sessionStorage`. Approver identity is recorded on every decision. | `apps/api/src/middleware/internalAuth.ts` and `ApproverSignIn` in `apps/ui/src/pages/AdminIntake.tsx` — swapping in SSO touches only those two |
+| Is 2GB feasible for the AEM Assets upload API? | AEM Engineering | `MAX_VIDEO_BYTES` defaults to 2GB and is enforced on the upload stream. Bytes are piped straight to AEM, never buffered, so the API's own memory is not the constraint — AEM's limit is. | `config.maxVideoBytes` |
+| Legal must approve the checkbox agreement copy | Legal | The checkbox copy is **from the PRD verbatim** and has not been reviewed. It blocks submission client- and server-side. | `apps/ui/src/pages/IntakeForm.tsx`, legal agreement section |
+| Where is the full terms document hosted? | Legal | `LEGAL_TERMS_URL` points at a placeholder capella.edu path. The form links to it in a new tab. | `.env` |
+| OAuth or Basic Auth for the service accounts? | IT | Basic Auth is implemented. | `aemClient.ts`, `aemUploadService.ts` — header construction only |
+| Is ffmpeg available on the server? | IT / DevOps | The worker checks at startup, logs a clear warning, and **disables transcription rather than crashing**. Audits are unaffected. | `apps/worker/src/index.ts` → `checkFfmpeg()` |
+| Max expected video length? | Engineering | Audio over Whisper's 25MB limit is **split into 20-minute chunks** and the transcripts merged with timestamp offsets applied. | `transcriptionProcessor.transcribeWithChunking()` |
+
+## Non-blocking
+
+| Question | Owner | What the code does now |
+|---|---|---|
+| Does Capella's AEM license include Adobe Sensei transcription? | AEM admin | Whisper is used. If Sensei is licensed it would replace `transcriptionService.ts` only — the VTT, chapter and storage steps are independent of the transcriber. |
+| Signed PDF — tool DB or document management system? | Legal | Default per PRD: stored on disk under `LEGAL_DOC_STORAGE_PATH`, outside the web root, never pushed to AEM. Served to approvers only. |
+| What happens to rejected assets after 90 days? | Legal / DAM admin | **Nothing.** Rejected assets stay in staging flagged `dam:status=rejected`. The tool has no delete permission by design, so any retention policy has to be an AEM-side workflow. |
+
+## Decisions made while building, worth confirming
+
+These were not in the PRD but had to be resolved to write the code.
+
+1. **Phase 1 publish status is often `unknown`.** Public HTML carries no reliable
+   published flag. The scraper uses the signals available (HTTP status, `noindex`,
+   AEM edit-mode markers, rendered content length) and returns `unknown` when they
+   disagree. The UI renders that honestly rather than guessing. Only
+   `cq:lastReplicated` is authoritative — Phase 2.
+
+2. **Program coverage is gated behind the AEM API even though counting is
+   possible in Phase 1.** A program with zero testimonials produces no rows to
+   count, so without AEM's program taxonomy the report would be silently missing
+   exactly the gaps it exists to find. It returns a `501` with that explanation
+   rather than a misleading grid.
+
+3. **Testimonial attribution is stripped before fingerprinting.** The same quote
+   credited "— Jane D." on one page and "— Jane Doe" on another would otherwise
+   create two rows. The name is extracted first, then removed from the text that
+   gets fingerprinted.
+
+4. **`needs_review` is sticky.** Once set, no scrape clears it. Only a human can.
+
+5. **Rate limits on the public intake route are deliberately tight** (5
+   submissions per hour per IP). It is unauthenticated and each request streams a
+   file to AEM.
+
+6. **Chapter detection uses Claude Haiku 4.5.** The `.claude/rules/` files named
+   `claude-sonnet-4-6`, which is not a current model ID. Haiku is the right tier
+   for a cheap bulk extraction over transcript text; the model is configurable via
+   `CHAPTER_DETECTION_MODEL`.
+
+## Corrections the live site forced (2026-09-16)
+
+Found by running a real audit against capella.edu. These contradict the PRD and
+the rules files, and the PRD should be updated.
+
+1. **`waitUntil: 'networkidle'` does not work on capella.edu.** Prescribed in
+   PRD §3 and `.claude/rules/`. The site keeps analytics connections open, so
+   network-idle is never reached — measured: still not reached 5s after `load`.
+   The first live audit failed 3 of 3 URLs on timeout. The scraper now uses
+   `waitUntil: 'load'` (~1.8s) plus a bounded best-effort settle
+   (`SCRAPER_SETTLE_MS`, default 2000).
+
+2. **None of the five testimonial selectors in PRD §8 match anything.** Capella
+   uses `.testimonialPromo` and `.testimonial-promo`; `.testimonial` is an exact
+   class match and hits neither. Added `[class*="testimonial" i]`. Without it the
+   tool reports zero testimonials sitewide — silently, which is the worst
+   possible failure mode for an audit tool.
+
+3. **The attribution format in PRD §8 is wrong.** The spec says to look for
+   `— Name`. The live markup has no dash: one element contains
+   `"quote" Name* Degree *Legal disclaimer`, with no inner element holding just
+   the quote. Parsing now splits on the quotation marks and reads the name from
+   the head of what follows. Without this the legal disclaimer ends up inside
+   `quote_text` and inside the dedup fingerprint, so the same quote appearing on
+   two pages with slightly different boilerplate would fail to dedup.
+
+4. **Names carry footnote markers.** "Stephanie Dewald*" — the asterisk points at
+   the disclaimer elsewhere on the page. Stripped from `student_name`.
+
+All four are covered by tests in `testimonialExtractor.test.ts` under the
+`real capella.edu markup` block, using the exact 267-character string the live
+page produces.
+
+## Bugs found by running it
+
+Worth recording because none were visible from reading the code:
+
+- **An intake failure crashed the whole API.** `submitVideo`'s promise was
+  created inside a busboy event handler and only awaited in a later `close`
+  handler; a rejection in between was unhandled, and Node terminated the
+  process. Any disabled-flag 501 took the server down. Fixed by attaching the
+  rejection handler at creation.
+- **BullMQ rejects `:` in custom job ids.** `audit:${id}` was refused, so no
+  audit could ever be queued.
+- **Nothing loaded `.env`.** `loadEnvFile()` resolves from `process.cwd()`,
+  which npm sets to the workspace directory, so the root `.env` was never
+  found. Now resolved by walking up from the config file itself.
+- **`normalizeUrl` turned any text into a URL.** Blind `https://` prefixing made
+  `ftp://example.com` into `https://ftp//example.com` and a CSV header cell
+  `title` into `https://title/` — both would then be queued and scraped.
+
+## Semantic search (added 2026-09-17)
+
+Search was substring matching, then term-based. It is now hybrid: four passes
+fused into one ranking. What each one exists to fix, measured on the real corpus:
+
+| Pass | Was failing | Now |
+|---|---|---|
+| exact | `flexibility program` → 0 | 1 |
+| stemmed | `nurse` → 0 | 1 |
+| semantic | `balancing work and study` → 0 | 1 |
+| fuzzy | `Wbeb` → 0 | 1 |
+
+**Model choice was measured, not assumed.** all-MiniLM-L6-v2 scores an unrelated
+control query at 0.09 and genuine matches at 0.36–0.58. bge-small-en-v1.5 — the
+usual "better" recommendation — scores the same control at **0.39**, above
+several of MiniLM's correct answers. It compresses everything into a narrow
+high band, so no threshold separates signal from noise. MiniLM won on separation,
+and is also smaller and faster.
+
+**Two thresholds, both measured:**
+- Absolute floor 0.30 — the empty band between the control (0.09) and real
+  matches (0.36+).
+- Relative cutoff 0.85 of the top score. The floor alone was not enough: for
+  "capella logo" *every* asset scored above 0.30, because every asset is a
+  Capella asset. That turned a 4-result search into 14. The signal is the gap
+  below the leaders, not the absolute value.
+
+**Typo tolerance uses edit distance, not trigrams.** Trigram similarity scores
+"Wbeb"→"Webb" at 0.111 because trigrams are order-sensitive and a transposition
+destroys two of them. Levenshtein separates cleanly: typos 1–2, unrelated 4–5.
+Applied only to name and program — a 200-character quote is 200 edits from any
+search term, so fuzzy matching on prose is meaningless.
+
+**Still not solved:** ranking between two closely related quotes. "juggling a job
+with school" returns a defensible but arguably second-best result. Tuned on four
+testimonials; re-check at real volume.
+
+## Bugs found building semantic search
+
+- **`NOT { embeddingModel: MODEL }` matched nothing.** In SQL,
+  `NOT (col = 'x')` is NULL when the column is NULL, and a WHERE drops NULL
+  rows — so the sweep skipped every row that had never been embedded, which was
+  all of them. Needs an explicit `OR col IS NULL`.
+- **A fixed BullMQ job id made the sweep run exactly once.** The id was meant to
+  coalesce concurrent requests, but BullMQ rejects a duplicate id against a
+  *completed* job too, and completed jobs were being retained. Every later sweep
+  silently did nothing. Fixed with `removeOnComplete: true`.
+- **The worker could not reach huggingface.co.** The model is now vendored into
+  `.model-cache/` by `npm run embed:prewarm`, so the worker needs no network —
+  which is what you want on a locked-down host anyway.
+- **Short search terms highlighted inside unrelated words.** "back to school"
+  marked the "to" in "s(to)pped". Terms under three characters are now anchored
+  to word boundaries.
+
+
+## The DAM root the PRD specifies does not exist (found 2026-09-17)
+
+PRD §4 and `.claude/rules/architecture.md` both say to index only
+`/content/dam/capella/`. Reverse lookup rejected a perfectly valid asset URL a
+designer pasted straight out of the browser, which is how this surfaced.
+
+Counting DAM path roots in the HTML of three live pages:
+
+| Page | `/content/dam/capella/` | everything else |
+|---|---|---|
+| `/` | 4 | `vc/logo` 44 · `sei/capella` 24 · `sei/strayer` 3 · `sei/global-logos` 3 |
+| `/about/` | 4 | `sei/capella` 37 · `sei/global-logos` 28 · `sei/strayer` 21 · `su-edu/…` 14 |
+| `/online-degrees/` | 39 (`capella/FlexPath`) | `vc/logo` 33 · `sei/capella` 7 |
+
+Capella has been migrated into the shared SEI DAM. Re-running the same three-URL
+audit after widening `DAM_ROOT` to `/content/dam/` took the index from 14 assets
+to **51** — the tool had been discarding roughly three quarters of every page and
+reporting the remainder as if it were the whole picture.
+
+That is the worst failure mode this tool has: not an error, but a confident
+undercount. Anyone asking "is this asset still used anywhere?" would have been
+told no.
+
+**Open question for IT / DAM owners:** which of these roots are in scope for a
+Capella audit? All of them are indexed now, and `damBrand()` derives the brand
+per asset so they can be filtered, but nobody has said whether
+`/content/dam/sei/strayer/` appearing on a Capella page is a finding or just
+shared footer chrome.
+
+**Video intake moved too — as a separate, deliberate decision** (2026-09-17).
+It was left alone in the first pass precisely because widening a write path as a
+side effect of a read fix is how boundaries erode. Camila then made the call:
+new video assets belong with the rest of Capella's assets, so staging is now
+`/content/dam/sei/capella/intake/pending/` and the live destination is
+`/content/dam/sei/capella/{program}/videos/`.
+
+The write scope stays exactly two paths. What changed structurally is that both
+now come from config (`AEM_INTAKE_STAGING_PATH`, `AEM_INTAKE_LIVE_ROOT`) and the
+in-code allowlist is *derived* from them instead of being a second hardcoded
+copy — previously the live root was a literal regex in `assertWritablePath`, so
+moving intake would have required remembering to change two places that nothing
+checked against each other.
+
+**This needs IT before it works.** The service account has to be re-scoped to
+the new paths and the dispatcher rule blocking the staging folder has to move
+with it (`docs/dam-permissions.md` is updated and states both). Until then
+uploads fail closed, which is the correct behaviour but is a launch blocker, not
+a warning.
+
+Writing the write boundary's first tests as part of this turned up a real hole:
+a path of exactly `{staging}/` — the folder node, no filename — passed the
+allowlist, because the check was `startsWith` against the root. Staging is flat,
+so it now requires exactly one non-empty filename segment.
+
+**Consequence for anything audited before this fix:** those asset counts are
+wrong and low. Re-run the audit.
+
+
+## CSS background images were invisible to the audit (found 2026-09-17)
+
+Reported from the page itself: the `12k-tuition-cap` hero was not being picked
+up. The asset was in the HTML the whole time — the extractor was only ever
+looking at attributes.
+
+Capella builds hero and footer banners as CSS, not `<img>`:
+
+```html
+<div style="background-image: linear-gradient(90deg, #212322 3.92%, …),
+                              url(/content/dam/capella/…/12K-desktop-hero.png);">
+```
+
+Classifying every DAM reference on that page by where it appears:
+
+| Where | Refs | Reachable before |
+|---|---|---|
+| `img[src]` / `srcset` | 13 | yes |
+| `link[href]` (preload, favicons) | 9 | **no** |
+| `a[href]` | 6 | yes |
+| `url()` in a `style` attribute | 2 | **no** |
+
+The two CSS references were the hero and the footer banner — the two images
+anyone looking at that page would name. Re-auditing after the fix took it from
+20 indexed assets to 30.
+
+Three changes:
+- `extractPathsFromCss` parses `url()` out of CSS. Separate from the attribute
+  parser because a CSS value can hold several `url()`s plus gradients full of
+  commas, so `srcset`-style comma splitting shreds it.
+- The scraper reads the computed `background-image` of every element, not just
+  the `style` attribute — measured at **5ms for ~2000 elements**, and on this
+  page one background image is set from a stylesheet where no attribute shows
+  it at all. No element cap: at that cost a cap would only buy a silent
+  undercount.
+- `link[href]` added to the selector. This also indexes favicons, which are
+  genuinely DAM assets referenced by the page; brand filtering is the answer to
+  that noise, not dropping the data.
+
+**A second bug fell out of writing the test.** The first assertion said the
+attribute parser should return nothing for a CSS value. It did not — it returned
+the correct asset with `);` still attached. `normalizeAssetPath` never checked
+where a path ended, so any path lifted out of surrounding syntax kept the
+syntax, indexing a real asset under a filename that does not exist. It now stops
+at the first character that cannot appear in a URL path. Nothing downstream
+would ever have flagged that: the row looks fine and simply never matches.
+
+**Still not covered:** assets referenced only from JavaScript (a JSON config
+block, a data attribute holding a serialized payload). One reference on this
+page falls in that bucket. Worth revisiting if a specific asset turns up missing;
+parsing arbitrary JS for paths guesses more than it knows.

@@ -1,0 +1,14 @@
+{
+  "//": "Solution-style root config. It holds no files of its own — `tsc --build` walks these references in dependency order.",
+  "files": [],
+  "references": [
+    { "path": "./packages/types" },
+    { "path": "./packages/embedding" },
+    { "path": "./packages/db" },
+    { "path": "./packages/queue" },
+    { "path": "./packages/scraper" },
+    { "path": "./apps/api" },
+    { "path": "./apps/worker" },
+    { "path": "./apps/ui" }
+  ]
+}

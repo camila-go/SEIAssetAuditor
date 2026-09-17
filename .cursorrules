@@ -1,0 +1,188 @@
+# SEI Site Auditor
+
+Internal tool for auditing AEM DAM assets and testimonials across capella.edu. Read PRD.md before implementing any feature.
+
+## Project
+
+React + TypeScript frontend (Vite), Node.js + Express backend, BullMQ + Redis job queue, PostgreSQL via Prisma, perceptual hashing for duplicate detection, Playwright scraper (headless Chromium — required for JS-rendered pages).
+
+## Commands
+
+- `npm run dev` — frontend (5173) + backend (3001) + worker concurrently
+- `npm run dev:worker` — BullMQ worker only
+- `npm run test` — Jest
+- `npm run lint` — ESLint + TypeScript
+- `npm run db:migrate` — Prisma migrations
+
+## Architecture
+
+```
+UI → API (Express) → Services → Prisma → PostgreSQL
+                  ↘ BullMQ Queue → Redis
+                          ↓
+                     Worker Process
+                          ↓
+                     Scraper → Prisma → PostgreSQL
+```
+
+Route handlers thin — validate, enqueue or call service, respond.
+All Prisma queries in `packages/db/repositories/` only.
+Worker (`apps/worker/`) separate process — imports queue, scraper, db packages only.
+Queue definitions in `packages/queue/` — shared between API and worker.
+
+## Job Queue — Critical
+
+NEVER process more than one page synchronously in an API request.
+
+Audit flow:
+1. `POST /api/v1/audit` → create AuditJob + AuditJobUrl rows → enqueue → return `{ jobId }`
+2. Worker: batches of 10 URLs → scrape → write results → update `completed_urls`
+3. `GET /api/v1/audit/:jobId/status` → UI polls every 3s
+4. `GET /api/v1/audit/:jobId/results` → paginated, queryable before job completes
+5. One bad URL must never stop the job — mark failed, continue
+
+Input types: paste URLs, CSV/TXT upload, sitemap URL (parse XML `<loc>` elements).
+
+## AEM Context
+
+- Live site: `https://www.capella.edu`
+- Asset path: `/content/dam/capella/`
+- Page path: `/content/capella/en/`
+- Public URLs: `AEM_PUBLIC_HOST` + `aem_path` — never hardcode domain
+- Phase 2 needs IT service account (see `.env.example`)
+
+## AEM Query Builder (Phase 2) — Critical Rules
+
+Endpoint: `GET /bin/querybuilder.json` on AEM author host.
+
+**DEFAULT LIMIT IS 10 HITS — always set `p.limit` explicitly or results are silently truncated.**
+
+Key params:
+- `p.limit` — always set. Use `-1` for all (caution on large sets)
+- `p.hits=selective` + `p.properties` — always prefer over `p.hits=full` to reduce payload
+- `p.guessTotal=true` — fast pagination, avoids full count. Returns `more: true` when results exceed limit
+- `p.guessTotal=N` — exact count up to N, then `more: true` — best for UI pagination
+- `orderby=@jcr:content/cq:lastModified` + `orderby.sort=desc` — recency sort
+- `group.p.or=true` — OR logic for grouped predicates (default is AND)
+- `1_property`, `2_property` — numeric prefix when using same predicate multiple times
+- `tagid` + `tagid.property=jcr:content/cq:tags` — tag matching
+- `p.offset` — pagination offset
+
+Performance: always use `p.guessTotal` for large result sets — exact counts require reading entire set for access control, significant perf hit at scale.
+
+Example — find pages referencing an asset:
+```
+GET /bin/querybuilder.json
+  ?path=/content/capella/en
+  &type=nt:base
+  &property=fileReference
+  &property.value=/content/dam/capella/images/hero.jpg
+  &p.limit=500
+  &p.hits=selective
+  &p.properties=path jcr:content/jcr:title jcr:content/cq:lastReplicated
+  &p.guessTotal=true
+```
+
+## Testimonial Extraction
+
+Two storage types — handle both:
+- `structured_component`: `[data-component="testimonial"]`, `.cmp-testimonial`
+- `hardcoded_text`: `blockquote`, `[class*="quote"]` + attribution patterns
+
+Selectors (priority order):
+1. `[data-component="testimonial"]`
+2. `.cmp-testimonial`
+3. `.testimonial`, `.student-quote`
+4. `blockquote + [class*="name"]`
+5. `[class*="quote"] + [class*="student"]`
+
+Deduplication: normalize `quote_text` (lowercase, strip punctuation) as fingerprint.
+Upsert on fingerprint. Conflict on `student_name`/`program` → `needs_review = true`, never overwrite.
+
+## Key Routes
+
+```
+/audit            → Start audit (paste / upload CSV / sitemap)
+/audit/:jobId     → Live progress + streaming results
+/lookup           → Asset reverse lookup
+/assets           → Browse assets
+/assets/:id       → Asset detail
+/duplicates       → Duplicate groups
+/testimonials     → Search testimonials
+/testimonials/:id → Testimonial detail
+/programs/coverage → Program coverage gaps (Phase 2)
+```
+
+## Code Conventions
+
+- TypeScript strict, no `any`
+- Named exports only (except page components)
+- Response shape: `{ data, error?, meta? }` always
+- Never access `process.env` directly — use `config.ts`
+- Soft deletes only — never hard delete
+- Phase 2/3 features gated by `config.aemApiEnabled` / `config.socialEnabled`
+
+## Scraper
+
+- Playwright headless Chromium — Capella is JS-rendered, static fetch returns nav only
+- One shared browser instance per worker — never launch per page
+- `waitUntil: 'networkidle'` on every page.goto(), 30s timeout
+- 5 concurrent Playwright pages max (heavier than fetch)
+- Sitemap XML fetched with plain node-fetch (static, no JS needed)
+- One pass per page: extract assets AND testimonials from fully rendered DOM
+- Phase 2: testimonials switch to AEM Query Builder, Playwright retained for asset references
+- Never launch real Playwright in tests — mock chromium.launch()
+
+## Do Not
+
+- Process bulk audits synchronously
+- Set Query Builder queries without explicit `p.limit`
+- Write to AEM or modify assets/testimonials
+- Store asset binaries — link only
+- Commit `.env`
+- Write Prisma queries outside repository files
+- Render `null` for loading — use skeletons
+- Auto-resolve `needs_review` testimonials
+
+## Video Intake — Write Operations
+
+This is the ONLY place the tool writes to AEM. All writes go through `aemUploadService.ts` only.
+
+Intake write account (`AEM_INTAKE_WRITE_USER`) is separate from read-only audit account.
+
+Flow:
+1. `POST /api/v1/intake` (public, no auth) → validate → stream video to AEM staging → set metadata → create VideoSubmission → notify approvers → return { submissionId }
+2. Approver calls `POST /api/v1/intake/:id/approve` or `POST /api/v1/intake/:id/reject` (internal auth)
+3. On full approval → move asset from `/content/dam/capella/intake/pending/` to `/content/dam/capella/{program}/videos/` → update dam:status = approved
+4. On rejection → update VideoSubmission.status = rejected → email submitter with reason
+5. Submitter resubmits via `POST /api/v1/intake/:id/resubmit` (public) → creates new VideoSubmission with parent_submission_id
+
+AEM write calls:
+```
+POST /api/assets/capella/intake/pending/{filename}  — upload (stream, never buffer)
+PUT  /api/assets/capella/intake/pending/{filename}/jcr:content/metadata  — set tags
+MOVE /content/dam/capella/intake/pending/{filename}  — move on approval
+PUT  /api/assets/capella/{program}/videos/{filename}/jcr:content/metadata  — update status
+```
+
+Approval chain mode from env: `APPROVAL_CHAIN_MODE=sequential | parallel`
+- sequential: legal → marketing → publish
+- parallel: both notified immediately, both must approve → publish
+
+Status transitions:
+```
+submitted → pending_review → legal_approved → marketing_approved → approved
+                          ↘ rejected (any approver) → notify submitter → resubmitted
+```
+
+Public routes: `/intake`, `/intake/confirm`, `/intake/resubmit/:id` — rate limit aggressively
+Internal routes: `/admin/intake/*` — require internalAuth middleware
+
+Video files stream directly to AEM — never buffer in memory or write to disk.
+AEM staging folder `/content/dam/capella/intake/` must be blocked at dispatcher level (IT config).
+
+## Do Not (updated)
+- Write to AEM except through aemUploadService.ts in the intake flow
+- Buffer video files in memory — stream directly to AEM
+- Expose AEM paths or internal IDs on public-facing intake pages
+- Auto-publish AEM pages after approval — asset moves to live DAM only, content authors place it

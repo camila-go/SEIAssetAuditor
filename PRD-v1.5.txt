@@ -1,0 +1,569 @@
+PRODUCT REQUIREMENTS DOCUMENT
+Capella DAM Asset Intelligence Tool
+Internal tooling to automate AEM DAM auditing, asset reverse lookup, duplicate detection, testimonial management, video intake with legal approval workflow, auto-transcription, and social performance tracking
+Version
+1.5 — DAM Permissions + Playwright scraper added
+Date
+July 2026
+Author
+Product Design Team
+Status
+Draft — Pending Engineering & IT Review
+Platform
+AEM (capella.edu)  ·  PostgreSQL  ·  Redis  ·  OpenAI Whisper  ·  Social APIs
+
+1. Problem Statement
+
+The Capella design team audits digital assets and content entirely by hand — clicking through pages one by one to find which images are live, whether those pages are published, whether duplicate assets exist in the DAM, and where testimonials appear across the site.
+
+At tens of thousands of assets, hundreds of pages, and audits that span 1000+ URLs, this is completely unsustainable. Testimonials are especially difficult: stored as both reusable AEM components and hardcoded text, they must be searchable by quote, student name, and program, and audited for freshness and coverage gaps across degree programs.
+
+Additionally, there is no structured intake process for video assets. Internal staff and external vendors submit videos through ad hoc channels, bypassing legal and marketing review, and assets land in the DAM without consistent metadata, tagging, or approval status. This creates legal exposure and brand inconsistency.
+2. Users
+
+Primary — Product & Content Designers
+Run asset and testimonial audits across hundreds or thousands of URLs
+Look up where a specific image or testimonial is currently live
+Identify stale, duplicate, or unused assets
+
+Secondary — Marketing Team
+Verify published pages are using approved assets and current testimonials
+Identify degree programs with insufficient testimonial coverage
+
+Video Submitters
+Internal Capella staff and external vendors submitting video assets for approval
+
+Approvers
+Legal team and marketing team reviewing submitted videos before DAM publish
+3. Phased Scope
+
+
+Phase 1 — Build Now
+Playwright scraper (no AEM auth) + BullMQ background jobs + video intake
+
+Feature
+Description
+Bulk URL audit
+Upload CSV/TXT or paste URLs — no cap, processed as a background job
+Audit job tracking
+Real-time progress bar, streaming results, close the tab and come back
+Sitemap import
+Paste a sitemap URL — tool extracts all page URLs automatically
+Asset reverse lookup
+Paste a DAM asset URL — see every page it appears on + live status
+Asset search
+Search indexed assets by filename or path
+Direct AEM link
+Every asset links to its /content/dam/capella/... path in AEM
+Live status
+Pages show Published / Draft badge based on scraped signals
+Testimonial scraping
+Detect both AEM components and hardcoded text testimonials from live pages
+Testimonial search
+Search by keyword/quote, student name, or program — single input
+Testimonial page map
+For any testimonial, see every page it appears on + live status
+Video intake form
+Public-facing form for internal staff and external vendors to submit videos
+Legal agreement
+Checkbox agreement blocks submission — optional signed PDF upload for supplementary contracts
+Video staging in AEM
+Uploads go directly to AEM DAM staging folder — restricted, not publicly accessible
+Approval workflow
+Tracks legal and marketing approvals — configurable sequential or parallel
+Rejection with resubmission
+Rejected submissions notify the submitter with a reason and allow resubmission
+Auto-transcription
+Whisper API transcription triggered on upload — audio only, temp file deleted immediately
+VTT caption file
+Generated from transcript and uploaded to AEM DAM alongside the video
+Chapter markers
+LLM pass over transcript detects topic shifts and generates chapter titles + timestamps
+Transcript in admin review
+Approvers see full transcript and chapters in the submission detail view
+
+Scraper: Playwright (not Cheerio)
+Capella's site is JS-rendered — a static HTML fetch returns only navigation, not page body content. This was confirmed by live page inspection. Playwright waits for networkidle before extracting the fully rendered DOM, then pulls /content/dam/ asset references and testimonial components in a single pass per page.
+
+~3–5 seconds per page (JS render + network idle)
+101 URLs from the audit doc: ~8–10 minutes total
+1000 URLs: ~60–90 minutes — acceptable as a background job
+5 concurrent Playwright pages max (heavier than fetch)
+Sitemap XML fetched with plain node-fetch (static, no JS needed)
+Phase 2: testimonials switch to AEM Query Builder — Playwright retained for asset references
+
+Scale architecture — job queue (required for 1000+ URLs)
+Audit jobs run as background tasks. A 1000-URL audit takes 20–40 minutes at safe scraping rates and would time out as a single HTTP request.
+
+User uploads CSV / pastes URLs / imports sitemap URL
+        ↓
+POST /api/v1/audit → creates AuditJob → enqueues to BullMQ → returns { jobId }
+        ↓
+Worker processes pages in batches of 5 (Playwright) — writes results to DB
+        ↓
+UI polls GET /api/v1/audit/:jobId/status → live progress bar
+        ↓
+Results queryable as they arrive — no waiting for full completion
+
+Phase 2 — Full AEM Integration
+Requires read-only service account from IT (request drafted)
+
+Feature
+Description
+Accurate reverse lookup
+Query Builder: find all pages referencing a given asset path
+Rich asset metadata
+Dimensions, tags, file size via AEM Assets REST API
+Accurate publish status
+Read cq:lastReplicated from page JCR node
+Duplicate detection
+pHash comparison across all indexed assets — catches renamed duplicates
+Unused asset flagging
+Assets with zero page references across the indexed site
+Structured testimonial extraction
+Query AEM directly for testimonial components — more reliable than DOM scraping
+Testimonial freshness flagging
+Flag testimonials not seen on any live page in 90+ days
+Program coverage gaps
+Show which programs have zero or fewer than 3 live testimonials
+CSV export
+All audit results downloadable — assets and testimonials
+
+Phase 3 — Social Performance
+Requires social API credentials + social-to-asset linking strategy
+
+Feature
+Description
+Social post linking
+Manually link an AEM asset → social post URL (stored in tool’s own DB)
+Platform metrics
+Pull views, engagement from Meta, TikTok, YouTube, LinkedIn APIs
+Performance ranking
+Rank assets by engagement across platforms with recency weighting
+
+4. Key Data Models
+
+Asset
+id, aem_path (unique), filename, asset_type
+width, height, file_size, tags[]
+last_seen_at, phash, is_indexed, deleted_at
+
+Page
+id, url (unique), title
+is_published, last_replicated_at, last_crawled_at, deleted_at
+
+AssetPageReference
+id, asset_id → Asset, page_id → Page, discovered_at
+
+AuditJob
+id, name, status (queued | running | complete | failed | cancelled)
+input_type (paste | csv_upload | sitemap)
+total_urls, completed_urls, failed_urls
+created_at, started_at, completed_at, created_by, error_message
+
+AuditJobUrl
+id, job_id → AuditJob, url
+status (pending | done | failed), processed_at, error
+
+Testimonial
+id, quote_text, quote_fingerprint (unique — normalized)
+student_name, program, degree_level
+source_type: structured_component | hardcoded_text
+raw_html, aem_component_path (nullable — Phase 2)
+needs_review (bool), first_seen_at, last_seen_at, is_active, deleted_at
+
+TestimonialPageReference
+id, testimonial_id → Testimonial, page_id → Page
+position_on_page, discovered_at
+
+VideoSubmission
+id, title, description, program, campaign
+usage_rights, rights_expiry_date
+submitter_name, submitter_email, submitter_org, notes
+filename, file_size, mime_type
+legal_agreed (bool), legal_agreed_at, legal_agreed_ip
+legal_doc_filename, legal_doc_stored_path (nullable)
+transcript, transcript_status (pending|processing|complete|failed)
+transcript_duration_seconds, chapter_markers (JSON), vtt_aem_path
+aem_staging_path, aem_final_path (nullable)
+status (draft|pending_review|legal_approved|marketing_approved|approved|rejected|resubmitted)
+rejection_reason (nullable), parent_submission_id (nullable)
+submitted_at, updated_at
+
+VideoApproval
+id, submission_id → VideoSubmission
+approver_type (legal | marketing), approver_email
+decision (approved | rejected), reason (nullable), decided_at
+
+SocialLink  (Phase 3)
+id, asset_id → Asset, platform, post_url, post_id
+metrics_json, last_fetched_at
+
+Testimonial deduplication rule:
+Normalize quote_text (lowercase, strip punctuation) as a unique fingerprint. Upsert on fingerprint. If student_name or program conflicts between pages, set needs_review = true — never silently overwrite.
+
+5. AEM Query Builder API Reference  (Phase 2)
+
+All calls go to GET /bin/querybuilder.json on the AEM author instance via capella-dam-audit-svc.
+
+⚠️  Default limit is 10 hits — always set p.limit explicitly or results will be silently truncated.
+
+Find pages referencing a specific asset
+GET /bin/querybuilder.json
+  ?path=/content/capella/en  &type=nt:base
+  &property=fileReference
+  &property.value=/content/dam/capella/images/hero.jpg
+  &p.limit=500  &p.hits=selective  &p.guessTotal=true
+  &p.properties=path jcr:content/jcr:title jcr:content/cq:lastReplicated
+
+Find all pages ordered by last modified
+GET /bin/querybuilder.json
+  ?type=cq:Page  &path=/content/capella/en
+  &orderby=@jcr:content/cq:lastModified  &orderby.sort=desc
+  &p.limit=100  &p.guessTotal=true
+
+Find pages by program tag
+GET /bin/querybuilder.json
+  ?type=cq:Page  &path=/content/capella/en
+  &tagid=programs/masters-degree
+  &tagid.property=jcr:content/cq:tags
+  &p.limit=200  &p.guessTotal=true
+
+Find all testimonial components
+GET /bin/querybuilder.json
+  ?path=/content/capella/en  &type=nt:base
+  &nodename=testimonial  &p.limit=1000  &p.hits=full
+
+Key Query Builder parameters
+Parameter
+Purpose
+p.limit
+Max results. ALWAYS set explicitly — default is 10
+p.offset
+Pagination start index
+p.guessTotal=true
+Fast pagination — returns more: true when results exceed limit
+p.guessTotal=N
+Exact count up to N, then more: true
+p.hits=selective
+Return only p.properties fields — always prefer over full
+p.hits=full
+Return all properties — avoid in production
+p.properties
+Space-separated list: path jcr:content/jcr:title
+orderby
+Sort property, prefix @ for JCR: @jcr:content/cq:lastModified
+orderby.sort
+asc or desc
+group.p.or=true
+OR logic for grouped predicates (default is AND)
+1_property, 2_property
+Numeric prefix for repeated predicates
+tagid
+Tag matching — pair with tagid.property=jcr:content/cq:tags
+
+Performance note:
+Always use p.guessTotal for large result sets — exact counts require reading the entire result set for access control, which is a significant difference in execution time at scale.
+
+6. Video Intake Architecture
+
+The intake flow is the only place this tool writes to AEM. The video file is uploaded directly to a restricted AEM DAM staging folder and never held in this tool's own storage.
+
+Submitter agrees to legal terms + submits form (public — no AEM credentials)
+        ↓
+Validation: legal_agreed checkbox must be true — blocks submission if unchecked
+        ↓
+Tool streams video to AEM via Assets HTTP API — never buffered in memory
+  POST /api/assets/capella/intake/pending/{filename}
+        ↓
+Metadata written: dam:status=pending-review, tags, submitter, legal fields
+        ↓
+VideoSubmission record created — transcription job enqueued
+        ↓
+Approvers notified — transcript + chapters available in review view
+        ↓
+All approvals → MOVE asset to /content/dam/capella/{program}/videos/
+Any rejection → notify submitter with reason — allow resubmission
+
+AEM write calls (capella-dam-intake-svc only)
+POST /api/assets/capella/intake/pending/{filename}           ← upload
+PUT  .../{filename}/jcr:content/metadata                     ← set tags
+MOVE /content/dam/capella/intake/pending/{filename}          ← approve
+PUT  /api/assets/capella/{program}/videos/{filename}/...     ← status
+
+Transcription pipeline (Whisper API — ~$0.006/min)
+ffmpeg extract audio → /tmp/{jobId}.mp3  (deleted in finally block)
+        ↓
+POST https://api.openai.com/v1/audio/transcriptions
+  model: whisper-1  response_format: verbose_json
+        ↓
+Generate .vtt caption file → upload to AEM alongside video
+LLM chapter detection on transcript text → store as JSON metadata
+
+Whisper API: $0.006/min — 10min video ≈ $0.06, 100 videos/month ≈ $6
+Temp audio file deleted in finally block — guaranteed even on error
+Transcription failure never blocks the approval workflow
+Whisper 25MB audio limit ≈ 45 min video — longer videos chunked
+
+Legal agreement
+Checkbox required — submission blocked entirely if unchecked (client + server enforced)
+Agreement timestamp and IP address recorded on every submission
+Optional PDF upload (vendor contracts, talent releases) — stored in tool DB, not AEM
+Legal team must approve terms copy before launch — see Open Questions
+
+Intake metadata fields
+Field
+Required
+Notes
+Video file
+Yes
+MP4, MOV, WebM — max 2GB
+Title
+Yes
+Becomes dc:title in AEM
+Description
+Yes
+Becomes dc:description
+Program
+Yes
+Maps to cq:tags program tag
+Campaign / project
+Yes
+Maps to cq:tags campaign tag
+Usage rights
+Yes
+Free text description
+Usage expiry date
+Yes
+Date — alerts generated before expiry
+Submitter name
+Yes
+Stored in submission record
+Submitter email
+Yes
+Used for all notifications
+Submitter organization
+Yes
+Capella dept or external agency
+Legal agreement checkbox
+Yes — BLOCKS submission
+Timestamp + IP recorded
+Signed legal doc (PDF)
+No — optional
+Stored in tool DB, not pushed to AEM
+Additional notes
+No
+Free text for approvers
+
+7. DAM Permissions Specification
+
+Two separate service accounts are required. Keeping them separate limits blast radius if either account is ever compromised.
+
+Account 1 — capella-dam-audit-svc (read-only)
+Purpose: Asset metadata, page references, Query Builder, publish status. Required for Phase 2 audit features.
+
+Permission
+Path
+Why
+dam:read
+/content/dam/capella/
+Read asset metadata and browse DAM
+jcr:read
+/content/dam/capella/
+Read JCR properties including cq:tags, dc:title
+jcr:read
+/content/capella/en/
+Read page content nodes for reference lookups
+/bin/querybuilder.json
+Author instance only
+Query Builder — blocked on publish by default
+/api/assets/
+Author instance only
+Assets REST API
+
+Explicitly do NOT grant:
+dam:create, dam:modify, dam:delete
+jcr:write anywhere
+crx:replicate — tool never publishes
+dam-administrators group membership
+Any access to the publish instance
+
+Account 2 — capella-dam-intake-svc (write-scoped to intake folder only)
+Purpose: Video upload to staging folder, metadata write, asset move on approval. Write access is intentionally narrow.
+
+Permission
+Path
+Why
+dam:read + dam:create
+/content/dam/capella/intake/pending/
+Upload new video assets
+dam:modify + jcr:write
+/content/dam/capella/intake/pending/
+Update metadata after upload
+dam:modify + jcr:write
+/content/dam/capella/{program}/videos/
+Move asset to live DAM on approval
+
+Explicitly do NOT grant:
+dam:delete — tool never deletes assets
+jcr:write on /content/capella/en/ — tool never modifies pages
+crx:replicate — tool never publishes pages or assets
+Write access anywhere outside the two intake paths above
+Membership in any replication agent group
+
+Dispatcher Requirements (IT configuration)
+These must be configured by IT before the tool goes live — not enforced by the tool itself.
+
+Requirement
+Instance
+Why
+Block public access to /content/dam/capella/intake/
+Publish dispatcher
+Staging videos must not be publicly accessible before approval
+Allow /bin/querybuilder.json for capella-dam-audit-svc
+Author only
+Query Builder is typically dispatcher-blocked by default
+Allow /api/assets/ for both service accounts
+Author only
+Assets REST API may be dispatcher-blocked
+
+Both accounts hit the author instance only — never publish.
+
+Permission Summary Matrix
+
+capella-dam-audit-svc
+capella-dam-intake-svc
+Read /content/dam/capella/
+✅  Yes
+✅  Intake subfolder only
+Write /content/dam/capella/intake/
+❌  No
+✅  Yes
+Write /content/dam/{program}/videos/
+❌  No
+✅  Yes
+Read /content/capella/en/
+✅  Yes
+❌  No
+Query Builder API
+✅  Yes
+❌  No
+Replicate / publish
+❌  No
+❌  No
+Delete assets
+❌  No
+❌  No
+
+Authentication: OAuth service token preferred (AEMaaCS) — avoids credentials in env vars. Basic Auth acceptable for AEM 6.x. Confirm with IT which method the author instance supports.
+8. Testimonial Scraping Selectors  (Phase 1)
+
+The Playwright scraper detects testimonials using these CSS/attribute patterns from the fully rendered DOM, in priority order:
+
+#
+Selector
+Rationale
+1
+[data-component="testimonial"]
+AEM component data attribute — most reliable
+2
+.cmp-testimonial
+AEM Core Components standard class
+3
+.testimonial  /  .student-quote
+Capella custom component classes
+4
+blockquote + [class*="name"]
+Quote element followed by attribution
+5
+[class*="quote"] + [class*="student"]
+Generic quote + student combo
+
+For each match, extract:
+quote_text — visible quote string, HTML tags stripped
+student_name — text matching “— Name” pattern or nearby .name element
+program — text matching known Capella degree strings or nearby .program element
+raw_html — full outer HTML of matched element for manual review
+9. Non-Goals
+
+Do NOT write to AEM except through the video intake flow — all other operations are read-only
+Do NOT host or store video files — upload directly to AEM DAM, never buffer in this tool
+Do NOT build a full DAM or video management platform — intake and approval only
+Do NOT build a social publishing or scheduling tool
+Do NOT replace AEM’s native DAM interface
+Do NOT auto-verify whether a testimonial is current — flag for human review only
+Do NOT process bulk audits synchronously — all multi-URL jobs must use the job queue
+Do NOT publish AEM pages automatically after video approval — asset moves to live DAM only
+10. Success Metrics
+
+Metric
+Target
+1000-URL audit (background job)
+Completes in under 90 minutes
+101-URL audit (from tracking doc)
+Completes in under 10 minutes
+Asset reverse lookup
+Returns results in under 5 seconds
+Testimonial search
+Returns results in under 2 seconds
+Program coverage gaps view
+Loads in under 3 seconds
+Streaming audit results
+Results queryable before job completes
+Video intake + AEM upload
+Completes in under 60 seconds for files up to 500MB
+Transcription (30 min video)
+Completes within 3 minutes of upload
+Approver notification
+Within 5 minutes of submission or prior approval
+Rejection notification
+Within 5 minutes of rejection decision
+Design team adoption
+80% of team using tool within 30 days of launch
+11. Open Questions
+
+Question
+Owner
+Blocking?
+Sequential or parallel approval chain?
+Legal + Marketing leads
+Yes
+Who are the named legal approvers?
+Legal
+Yes
+Who are the named marketing approvers?
+Marketing
+Yes
+Does approval auto-make asset usable, or does a content author still place it?
+Content team
+Yes
+Should internal submitters require Capella SSO login?
+IT / Security
+Yes
+Max file size — is 2GB feasible for AEM Assets upload API?
+AEM Engineering / IT
+Yes
+Legal team must approve the checkbox agreement terms copy
+Legal
+Yes — before launch
+Where should the full terms of use document be hosted?
+Legal
+Yes
+OAuth or Basic Auth for AEM service accounts?
+IT
+Yes
+Does Capella’s AEM license include Adobe Sensei transcription? (If yes, use instead of Whisper)
+AEM admin / IT
+No — check first
+Is ffmpeg available on the server environment?
+IT / DevOps
+Yes — required for audio extraction
+Max expected video length? (Whisper 25MB limit ≈ 45 min)
+Engineering
+Yes
+Signed PDF — store in tool DB or push to document management system?
+Legal
+No — default is tool DB
+What happens to rejected assets after 90 days?
+Legal / DAM admin
+No

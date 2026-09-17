@@ -1,0 +1,26 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# Environment — never commit
+.env
+.env.local
+.env.test
+.env.*.local
+
+# Prisma
+packages/db/prisma/migrations/dev.db*
+
+# Legal document storage (signed PDFs) — never in the repo
+legal-docs/
+
+# Test + tooling output
+coverage/
+playwright-report/
+test-results/
+.eslintcache
+
+# OS
+.DS_Store
+.model-cache/

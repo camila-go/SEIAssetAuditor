@@ -1,0 +1,27 @@
+{
+  "name": "@capella/worker",
+  "version": "1.5.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc --build",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@capella/api": "*",
+    "@capella/db": "*",
+    "@capella/queue": "*",
+    "@capella/scraper": "*",
+    "@capella/types": "*",
+    "bullmq": "^5.8.0",
+    "execa": "^9.3.0",
+    "pino": "^9.2.0",
+    "zod": "^3.23.8",
+    "@capella/embedding": "*"
+  },
+  "devDependencies": {
+    "pino-pretty": "^11.3.0"
+  }
+}

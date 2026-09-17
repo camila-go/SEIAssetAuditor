@@ -1,0 +1,366 @@
+// SEI Site Auditor — data model
+// Mirrors PRD v1.5 §4. Soft deletes only: never hard delete, audit history must be preserved.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum AssetType {
+  image
+  video
+  document
+  audio
+  other
+}
+
+enum AuditJobStatus {
+  queued
+  running
+  complete
+  failed
+  cancelled
+}
+
+enum AuditInputType {
+  paste
+  csv_upload
+  sitemap
+}
+
+enum AuditUrlStatus {
+  pending
+  done
+  failed
+}
+
+enum TestimonialSourceType {
+  structured_component
+  hardcoded_text
+}
+
+enum SubmissionStatus {
+  draft
+  pending_review
+  legal_approved
+  marketing_approved
+  approved
+  rejected
+  resubmitted
+}
+
+enum ApproverType {
+  legal
+  marketing
+}
+
+enum ApprovalDecision {
+  approved
+  rejected
+}
+
+enum TranscriptStatus {
+  pending
+  processing
+  complete
+  failed
+}
+
+enum SocialPlatform {
+  meta
+  tiktok
+  youtube
+  linkedin
+}
+
+// ─── Assets & pages ──────────────────────────────────────────────────────────
+
+model Asset {
+  id        String    @id @default(uuid())
+  /// Always includes the leading slash: /content/dam/capella/...
+  aemPath   String    @unique @map("aem_path")
+  filename  String
+  assetType AssetType @map("asset_type")
+
+  width    Int?
+  height   Int?
+  fileSize Int?     @map("file_size")
+  tags     String[] @default([])
+
+  lastSeenAt DateTime? @map("last_seen_at")
+  /// Perceptual hash (blockhash-core), transparency flattened onto white.
+  /// Hamming distance <= 10 is a duplicate candidate.
+  phash      String?
+  /// Same image flattened onto black. Only set for images with an alpha
+  /// channel — a transparent logo exported to JPEG can land on either
+  /// background, and the two hashes are otherwise ~108/256 bits apart.
+  phashAlt   String?   @map("phash_alt")
+  isIndexed  Boolean   @default(false) @map("is_indexed")
+
+  /// Sentence embedding for semantic search. Stored as a plain float array
+  /// rather than a pgvector column because this Postgres has no `vector`
+  /// extension available; similarity is computed in the application. See
+  /// packages/db/src/semantic.ts for the scale at which that stops being fine.
+  embedding      Float[]   @default([])
+  /// Which model produced `embedding` — a row embedded by a different model is
+  /// not comparable and is re-embedded rather than silently mis-ranked.
+  embeddingModel String?   @map("embedding_model")
+  embeddedAt     DateTime? @map("embedded_at")
+
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  pageReferences AssetPageReference[]
+  socialLinks    SocialLink[]
+
+  @@index([phash])
+  @@index([filename])
+  @@index([assetType, deletedAt])
+  @@map("assets")
+}
+
+model Page {
+  id    String  @id @default(uuid())
+  url   String  @unique
+  title String?
+
+  /// Phase 1: scraped heuristic. Phase 2: derived from cq:lastReplicated. Null = unknown.
+  isPublished      Boolean?  @map("is_published")
+  lastReplicatedAt DateTime? @map("last_replicated_at")
+  lastCrawledAt    DateTime? @map("last_crawled_at")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  assetReferences       AssetPageReference[]
+  testimonialReferences TestimonialPageReference[]
+
+  @@index([isPublished, deletedAt])
+  @@index([lastCrawledAt])
+  @@map("pages")
+}
+
+model AssetPageReference {
+  id           String   @id @default(uuid())
+  assetId      String   @map("asset_id")
+  pageId       String   @map("page_id")
+  discoveredAt DateTime @default(now()) @map("discovered_at")
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  page  Page  @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, pageId])
+  @@index([pageId])
+  @@map("asset_page_references")
+}
+
+// ─── Audit jobs ──────────────────────────────────────────────────────────────
+
+model AuditJob {
+  id        String         @id @default(uuid())
+  name      String
+  status    AuditJobStatus @default(queued)
+  inputType AuditInputType @map("input_type")
+
+  totalUrls     Int @default(0) @map("total_urls")
+  completedUrls Int @default(0) @map("completed_urls")
+  failedUrls    Int @default(0) @map("failed_urls")
+
+  createdAt    DateTime  @default(now()) @map("created_at")
+  startedAt    DateTime? @map("started_at")
+  completedAt  DateTime? @map("completed_at")
+  createdBy    String?   @map("created_by")
+  errorMessage String?   @map("error_message")
+
+  urls AuditJobUrl[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("audit_jobs")
+}
+
+model AuditJobUrl {
+  id     String         @id @default(uuid())
+  jobId  String         @map("job_id")
+  url    String
+  status AuditUrlStatus @default(pending)
+
+  processedAt DateTime? @map("processed_at")
+  error       String?
+
+  /// Denormalized per-URL counts so the results table does not need a join fan-out.
+  assetCount       Int     @default(0) @map("asset_count")
+  testimonialCount Int     @default(0) @map("testimonial_count")
+  pageTitle        String? @map("page_title")
+  isPublished      Boolean? @map("is_published")
+
+  job AuditJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  /// Resumability: the worker claims rows where status = pending for this job.
+  @@unique([jobId, url])
+  @@index([jobId, status])
+  @@map("audit_job_urls")
+}
+
+// ─── Testimonials ────────────────────────────────────────────────────────────
+
+model Testimonial {
+  id        String @id @default(uuid())
+  quoteText String @map("quote_text")
+  /// Normalized quote (lowercase, punctuation stripped, whitespace collapsed).
+  /// Upsert key — see testimonialExtractor.fingerprint().
+  quoteFingerprint String @unique @map("quote_fingerprint")
+
+  studentName String? @map("student_name")
+  program     String?
+  degreeLevel String? @map("degree_level")
+
+  sourceType       TestimonialSourceType @map("source_type")
+  rawHtml          String?               @map("raw_html")
+  aemComponentPath String?               @map("aem_component_path")
+
+  /// Set when student_name or program conflict across pages. Never auto-resolved.
+  needsReview Boolean @default(false) @map("needs_review")
+
+
+  /// Sentence embedding for semantic search. Stored as a plain float array
+  /// rather than a pgvector column because this Postgres has no `vector`
+  /// extension available; similarity is computed in the application. See
+  /// packages/db/src/semantic.ts for the scale at which that stops being fine.
+  embedding      Float[]   @default([])
+  /// Which model produced `embedding` — a row embedded by a different model is
+  /// not comparable and is re-embedded rather than silently mis-ranked.
+  embeddingModel String?   @map("embedding_model")
+  embeddedAt     DateTime? @map("embedded_at")
+
+  firstSeenAt DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt  DateTime  @default(now()) @map("last_seen_at")
+  isActive    Boolean   @default(true) @map("is_active")
+  deletedAt   DateTime? @map("deleted_at")
+
+  pageReferences TestimonialPageReference[]
+
+  @@index([program])
+  @@index([studentName])
+  @@index([needsReview])
+  @@index([lastSeenAt])
+  @@map("testimonials")
+}
+
+model TestimonialPageReference {
+  id             String   @id @default(uuid())
+  testimonialId  String   @map("testimonial_id")
+  pageId         String   @map("page_id")
+  positionOnPage Int?     @map("position_on_page")
+  discoveredAt   DateTime @default(now()) @map("discovered_at")
+
+  testimonial Testimonial @relation(fields: [testimonialId], references: [id], onDelete: Cascade)
+  page        Page        @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@unique([testimonialId, pageId])
+  @@index([pageId])
+  @@map("testimonial_page_references")
+}
+
+// ─── Video intake ────────────────────────────────────────────────────────────
+
+model VideoSubmission {
+  id          String @id @default(uuid())
+  title       String
+  description String
+  program     String
+  campaign    String
+
+  usageRights      String   @map("usage_rights")
+  rightsExpiryDate DateTime @map("rights_expiry_date")
+
+  submitterName  String  @map("submitter_name")
+  submitterEmail String  @map("submitter_email")
+  submitterOrg   String  @map("submitter_org")
+  notes          String?
+
+  filename String
+  fileSize Int?   @map("file_size")
+  mimeType String @map("mime_type")
+
+  /// Always true if the record exists — submission is blocked server-side otherwise.
+  legalAgreed   Boolean  @default(true) @map("legal_agreed")
+  legalAgreedAt DateTime @map("legal_agreed_at")
+  legalAgreedIp String?  @map("legal_agreed_ip")
+
+  /// Optional supplementary PDF. Stored on disk under LEGAL_DOC_STORAGE_PATH — never pushed to AEM.
+  legalDocFilename   String? @map("legal_doc_filename")
+  legalDocStoredPath String? @map("legal_doc_stored_path")
+
+  transcript                String?          @db.Text
+  transcriptStatus          TranscriptStatus @default(pending) @map("transcript_status")
+  transcriptDurationSeconds Int?             @map("transcript_duration_seconds")
+  /// JSON array of { time: "HH:MM:SS", title: string }. Null when detection failed.
+  chapterMarkers            Json?            @map("chapter_markers")
+  vttAemPath                String?          @map("vtt_aem_path")
+
+  aemStagingPath String? @map("aem_staging_path")
+  aemFinalPath   String? @map("aem_final_path")
+
+  status          SubmissionStatus @default(draft)
+  rejectionReason String?          @map("rejection_reason")
+
+  parentSubmissionId String?           @map("parent_submission_id")
+  parentSubmission   VideoSubmission?  @relation("Resubmission", fields: [parentSubmissionId], references: [id])
+  resubmissions      VideoSubmission[] @relation("Resubmission")
+
+  submittedAt DateTime @default(now()) @map("submitted_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  approvals VideoApproval[]
+
+  @@index([status])
+  @@index([submitterEmail])
+  @@index([program])
+  @@index([submittedAt])
+  @@map("video_submissions")
+}
+
+model VideoApproval {
+  id           String @id @default(uuid())
+  submissionId String @map("submission_id")
+
+  approverType  ApproverType     @map("approver_type")
+  approverEmail String           @map("approver_email")
+  decision      ApprovalDecision
+  reason        String?
+  decidedAt     DateTime         @default(now()) @map("decided_at")
+
+  submission VideoSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  /// An approver type may act only once per submission.
+  @@unique([submissionId, approverType])
+  @@map("video_approvals")
+}
+
+// ─── Phase 3 ─────────────────────────────────────────────────────────────────
+
+model SocialLink {
+  id      String         @id @default(uuid())
+  assetId String         @map("asset_id")
+
+  platform      SocialPlatform
+  postUrl       String         @map("post_url")
+  postId        String?        @map("post_id")
+  metricsJson   Json?          @map("metrics_json")
+  lastFetchedAt DateTime?      @map("last_fetched_at")
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([platform, postUrl])
+  @@index([assetId])
+  @@map("social_links")
+}
