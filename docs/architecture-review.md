@@ -89,14 +89,16 @@ in one place and "what can I do" in another. The totals stay inert.
 |---|---|
 | Complexity | Low — one new component, one section removed |
 | Risk | Low; no API or data change |
-| Cost | Every tile needs a live number, so the duplicates count is now fetched on the dashboard |
+| Cost | Every tile wants a live number, and not every number is cheap to get |
 
 **Pros:** removes a section rather than adding one. Each number appears on the
 task it qualifies, so "65 indexed assets to search" states both the job and
 whether the answer can be trusted yet. Tile size can then carry importance —
 auditing is full-width because nothing else works until it has run.
-**Cons:** one extra request on load (`/duplicates`). A tile with no metric needs
-a deliberate empty state rather than showing `0`.
+**Cons:** a tile with no metric needs a deliberate empty state rather than
+showing `0`. And the pull toward giving every tile a number is a trap — the
+first attempt put an O(n²) query on the landing page to fill one in (see the
+self-review below). A metric has to be cheap, or the tile goes without.
 
 ### C. A guided wizard on first visit
 | Dimension | Assessment |
@@ -123,9 +125,10 @@ one-screen guide, a tour is machinery around content that can simply be read.
 **Easier:** a newcomer can see every job the tool does in one screen, with its
 current scale. Adding a task is one entry in an array.
 
-**Harder:** the dashboard now depends on `/duplicates`, so that endpoint being
-slow is felt on the landing page. It is a bounded pairwise comparison over
-hashed images, fine at this size, worth watching past a few thousand.
+**Harder:** every figure on this page is now load-bearing for the landing page's
+latency. That constraint bit immediately — the duplicates count was reverted for
+exactly this reason — so a new tile's metric must come from an indexed count,
+not from analysis.
 
 **To revisit:** the tile order is a judgement about what people come to do,
 based on the PRD rather than observed use. If audits get scheduled rather than
