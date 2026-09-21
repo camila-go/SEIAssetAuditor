@@ -234,3 +234,40 @@ export async function countHashedImages(): Promise<number> {
     },
   })
 }
+
+/**
+ * Rows still needing an embedding for `model`.
+ *
+ * The OR is load-bearing, not defensive. `NOT (embedding_model = 'x')`
+ * evaluates to NULL when the column IS NULL, and a WHERE drops NULL rows — so
+ * the obvious `{ not: model }` silently skipped every row that had never been
+ * embedded, which was all of them. The sweep reported "0 processed" and looked
+ * like it had finished.
+ */
+export async function findNeedingEmbedding(
+  model: string,
+  limit: number,
+): Promise<Array<{ id: string; filename: string; aemPath: string; tags: string[] }>> {
+  return prisma.asset.findMany({
+    where: {
+      deletedAt: null,
+      OR: [{ embeddingModel: null }, { embeddingModel: { not: model } }],
+    },
+    select: { id: true, filename: true, aemPath: true, tags: true },
+    take: limit,
+    orderBy: { id: 'asc' },
+  })
+}
+
+/** Record an embedding. `embeddedAt` is passed in so one batch shares a timestamp. */
+export async function setEmbedding(
+  id: string,
+  embedding: number[],
+  model: string,
+  embeddedAt: Date,
+): Promise<void> {
+  await prisma.asset.update({
+    where: { id },
+    data: { embedding, embeddingModel: model, embeddedAt },
+  })
+}

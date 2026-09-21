@@ -12,6 +12,7 @@ import {
   type MatchConfidence,
 } from '../api/queries'
 import { formatBytes } from '../lib/format'
+import { AssetPreview } from '../components/AssetPreview'
 
 type Mode = 'path' | 'image'
 
@@ -121,14 +122,10 @@ function PathLookup(): JSX.Element {
         ) : lookup.data ? (
           <article className="rounded-lg border border-ink-200 bg-white p-4">
             <div className="flex flex-wrap gap-4">
-              <img
+              <AssetPreview
                 src={lookup.data.publicUrl}
                 alt={lookup.data.filename}
-                loading="lazy"
-                className="asset-preview h-24 w-32 rounded border border-ink-200 p-1"
-                onError={(event) => {
-                  event.currentTarget.style.display = 'none'
-                }}
+                className="asset-preview h-24 w-32 shrink-0 rounded border border-ink-200 p-1"
               />
               <div className="min-w-0 flex-1">
                 <h2 className="font-medium text-ink-900">{lookup.data.filename}</h2>
@@ -387,14 +384,10 @@ function MatchCard({ match }: { match: ImageMatch }): JSX.Element {
   return (
     <article className="rounded-lg border border-ink-200 bg-white p-4">
       <div className="flex flex-wrap gap-4">
-        <img
+        <AssetPreview
           src={match.publicUrl}
           alt={match.filename}
-          loading="lazy"
           className="asset-preview h-24 w-24 shrink-0 rounded border border-ink-200 p-1"
-          onError={(event) => {
-            event.currentTarget.style.visibility = 'hidden'
-          }}
         />
 
         <div className="min-w-0 flex-1">

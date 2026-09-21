@@ -11,7 +11,7 @@ import type {
   TestimonialWithReferences,
   VideoSubmissionDetail,
 } from '@capella/types'
-import { api, qs } from './client'
+import { api, hasInternalCredentials, qs } from './client'
 import type { MatchReason } from '../components/MatchReason'
 
 /** All server state goes through React Query — never into Zustand. */
@@ -400,14 +400,21 @@ export function useDashboardStats(): UseQueryResult<DashboardStats> {
         api.get<DashboardStats['testimonials']>('/testimonials/stats'),
       ])
 
-      // The intake tile needs approver credentials; its absence is expected for
-      // a designer who only runs audits, so it degrades to null rather than
-      // failing the whole dashboard.
+      // The intake tile needs approver credentials. A designer who only runs
+      // audits has none, which is the normal case — so this degrades to null
+      // rather than failing the whole dashboard.
+      //
+      // Checked before calling rather than after failing: firing a request we
+      // know will 401 filled the console with red errors on every dashboard
+      // load, which reads as a broken tool to anyone who opens devtools. The
+      // try/catch stays for a token that has expired or been revoked.
       let intake: DashboardStats['intake'] = null
-      try {
-        intake = (await api.get<NonNullable<DashboardStats['intake']>>('/intake/stats')).data
-      } catch {
-        intake = null
+      if (hasInternalCredentials()) {
+        try {
+          intake = (await api.get<NonNullable<DashboardStats['intake']>>('/intake/stats')).data
+        } catch {
+          intake = null
+        }
       }
 
       return { assets: assets.data, testimonials: testimonials.data, intake }

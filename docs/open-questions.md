@@ -310,3 +310,34 @@ This is the third instance of the same failure shape in this tool — confident,
 plausible-looking output built on an input that silently carried no signal. The
 other two were the all-assets semantic match ("capella logo" matching the entire
 DAM because every asset is a Capella asset) and the narrow DAM root.
+
+
+## Part of the DAM is not publicly served (found 2026-09-21)
+
+Measured with a redirect-following request against the live site:
+
+```
+/content/dam/vc/logo/accreditation/ACBSP_Logo_3.png
+  -> 301 to the same path with a trailing slash -> 403 text/html
+
+/content/dam/sei/capella/logos/Capella_FlexPath_2024_White_051425.svg
+  -> 200 image/svg+xml
+```
+
+So the dispatcher serves `sei/capella` publicly but not `vc`. Two consequences,
+both of which were previously invisible:
+
+- **Thumbnails for those assets cannot load.** All three call sites responded to
+  an image error by setting `visibility: hidden`, leaving a blank hole that is
+  indistinguishable from a bug in this tool. They now render a labelled
+  placeholder — this is the broken-image fallback `.claude/rules/frontend.md`
+  asked for and never had.
+- **Those images can never be fingerprinted over HTTP**, so reverse image search
+  and duplicate detection cannot cover them in Phase 1. This is the real reason
+  pHash coverage sits at 56 of 58 rather than a bug in the sweep.
+
+**Open question for IT:** is `/content/dam/vc/` meant to be publicly
+unreachable? If it is deliberate, full reverse-image coverage needs the AEM read
+account rather than public HTTP, and that should be said plainly in the readiness
+assessment. If it is an oversight in the dispatcher rules, it is a one-line fix
+on their side.

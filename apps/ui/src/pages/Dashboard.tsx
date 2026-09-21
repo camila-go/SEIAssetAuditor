@@ -1,22 +1,34 @@
 import { Link } from 'react-router-dom'
 import { PageHeader } from '../components/Layout'
 import { CardSkeleton, ErrorState } from '../components/States'
-import { useAuditJobs, useDashboardStats, type AuditJobSummary, type DashboardStats } from '../api/queries'
+import { TaskGrid, type Task } from '../components/TaskGrid'
+import { useAuditJobs, useDashboardStats, useDuplicates, type AuditJobSummary, type DashboardStats } from '../api/queries'
 import { useAuditStore } from '../store/auditStore'
 import { formatDateTime } from '../lib/format'
 
 /**
  * `/` — the dashboard.
  *
- * Ordered by the question an auditor actually arrives with, which is "what
- * changed and what is broken" — not "how many things are there". So the page
- * reads: work in flight, then anything wanting attention, then recent audits,
- * and only then the totals. Totals are reference material; they were leading
- * the page and telling nobody anything.
+ * Two kinds of content, in this order:
+ *
+ * 1. State — what is running and what is broken. Time-sensitive, so it is
+ *    first, and each part renders nothing at all when there is nothing to say.
+ *    A permanent panel reading "0 issues" trains people to skip the region
+ *    where real problems will later appear.
+ * 2. Tasks — the jobs the tool exists to do, as a grid sized by importance.
+ *
+ * Recent audits sit below both. They are history: useful for getting back to a
+ * job, but they were pushing the tasks off the first screen, and a list of five
+ * near-identical rows is a poor thing to lead with.
+ *
+ * The row of totals that used to close the page is gone. Those numbers were
+ * accurate and inert; each now sits on the task it gives scale to, which is the
+ * only place it means anything.
  */
 export default function Dashboard(): JSX.Element {
   const stats = useDashboardStats()
   const jobs = useAuditJobs(5)
+  const duplicates = useDuplicates(DUPLICATE_THRESHOLD)
   const recentJobs = useAuditStore((state) => state.recentJobs)
 
   const allJobs = jobs.data ?? []
@@ -41,7 +53,7 @@ export default function Dashboard(): JSX.Element {
     <div>
       <PageHeader
         title="Dashboard"
-        description="What is running, what needs attention, and what was audited recently."
+        description="What is running, what needs attention, and what you can do with the index."
       >
         <Link
           to="/audit"
@@ -86,7 +98,23 @@ export default function Dashboard(): JSX.Element {
       {/* ── 2. What is broken ────────────────────────────────────────────── */}
       {isLoading ? null : <NeedsAttention stats={stats.data} jobs={allJobs} />}
 
-      {/* ── 3. Recent audits ─────────────────────────────────────────────── */}
+      {/* ── 3. What you can do — the point of the page ───────────────────── */}
+      <section className="mb-8">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-md font-semibold text-ink-900">What you can do</h2>
+          <Link to="/guide" className="text-xs font-medium text-brand-700 hover:underline">
+            How this works →
+          </Link>
+        </div>
+
+        {stats.isError ? (
+          <ErrorState error={stats.error} onRetry={() => void stats.refetch()} />
+        ) : (
+          <TaskGrid tasks={buildTasks(stats.data, duplicates.data?.groups.length)} />
+        )}
+      </section>
+
+      {/* ── 4. Recent audits — history, so it goes last ──────────────────── */}
       <section className="mb-8">
         <h2 className="mb-2 text-md font-semibold text-ink-900">Recent audits</h2>
 
@@ -131,46 +159,76 @@ export default function Dashboard(): JSX.Element {
         ) : null}
       </section>
 
-      {/* ── 4. Totals — reference, not headline ──────────────────────────── */}
-      <section>
-        <h2 className="mb-2 text-md font-semibold text-ink-900">Index totals</h2>
-
-        {isLoading ? (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <CardSkeleton />
-            <CardSkeleton />
-            <CardSkeleton />
-            <CardSkeleton />
-          </div>
-        ) : stats.isError ? (
-          <ErrorState error={stats.error} onRetry={() => void stats.refetch()} />
-        ) : stats.data ? (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Stat label="Indexed assets" value={stats.data.assets.totalAssets} to="/assets" />
-            <Stat
-              label="Pages audited"
-              value={stats.data.assets.totalPages}
-              hint={`${stats.data.assets.publishedPages} appear published`}
-            />
-            <Stat
-              label="Testimonials"
-              value={stats.data.testimonials.totalTestimonials}
-              to="/testimonials"
-            />
-            <Stat
-              label="Videos submitted"
-              value={
-                stats.data.intake
-                  ? stats.data.intake.approved + stats.data.intake.rejected + stats.data.intake.pending
-                  : 0
-              }
-              hint={stats.data.intake ? `${stats.data.intake.approved} approved` : 'Sign in to view'}
-            />
-          </div>
-        ) : null}
-      </section>
     </div>
   )
+}
+
+/** Matches the default the duplicates view itself uses, so the count agrees. */
+const DUPLICATE_THRESHOLD = 10
+
+/**
+ * The tiles, with live figures attached.
+ *
+ * Every metric is phrased as scale rather than as an achievement — "across 65
+ * indexed assets" tells someone whether an answer can be trusted yet, which a
+ * bare "65" does not.
+ */
+function buildTasks(stats: DashboardStats | undefined, duplicateGroups: number | undefined): Task[] {
+  const assets = stats?.assets.totalAssets ?? 0
+  const pages = stats?.assets.totalPages ?? 0
+  const testimonials = stats?.testimonials.totalTestimonials ?? 0
+
+  return [
+    {
+      title: 'Audit a set of pages',
+      body: 'Paste URLs, upload a CSV, or point it at a sitemap. Everything else here reads the index this builds.',
+      to: '/audit',
+      span: 'full',
+      tone: 'primary',
+      metric: { value: pages.toLocaleString(), label: pages === 1 ? 'page audited so far' : 'pages audited so far' },
+    },
+    {
+      title: 'Find where an asset is used',
+      body: 'Search by DAM path or public URL — or drop in the picture itself and match it visually.',
+      to: '/lookup',
+      span: 'half',
+      metric: { value: assets.toLocaleString(), label: 'indexed assets to search' },
+    },
+    {
+      title: 'Search testimonials',
+      body: 'One box across quote, student and program. Tolerates typos and finds quotes by meaning.',
+      to: '/testimonials',
+      span: 'half',
+      metric: { value: testimonials.toLocaleString(), label: testimonials === 1 ? 'quote indexed' : 'quotes indexed' },
+    },
+    {
+      title: 'Find duplicate images',
+      body: 'Groups images that are visually the same, including renamed and re-exported copies.',
+      to: '/duplicates',
+      span: 'half',
+      metric:
+        duplicateGroups === undefined
+          ? undefined
+          : {
+              value: duplicateGroups.toLocaleString(),
+              label: duplicateGroups === 1 ? 'group found' : 'groups found',
+            },
+    },
+    {
+      title: 'Review video submissions',
+      body: 'Approve or reject videos vendors have submitted, with the legal agreement they signed.',
+      to: '/admin/intake',
+      span: 'half',
+      ...(stats?.intake
+        ? {
+            metric: {
+              value: stats.intake.pending.toLocaleString(),
+              label: stats.intake.pending === 1 ? 'awaiting a decision' : 'awaiting a decision',
+            },
+          }
+        : { gated: 'Approver sign-in required' }),
+    },
+  ]
 }
 
 // ─── Needs attention ─────────────────────────────────────────────────────────
@@ -337,43 +395,5 @@ function FirstRun(): JSX.Element {
         coverage, video intake — say so when you open them.
       </p>
     </div>
-  )
-}
-
-// ─── Stat tile ───────────────────────────────────────────────────────────────
-
-interface StatProps {
-  label: string
-  value: number
-  hint?: string
-  to?: string
-}
-
-/**
- * A reference figure.
- *
- * These no longer carry state colour. Anything that wants attention is in the
- * "Needs attention" list above with a link straight to it — colouring the
- * totals as well said the same thing twice and diluted both.
- */
-function Stat({ label, value, hint, to }: StatProps): JSX.Element {
-  const content = (
-    <>
-      <p className="text-label font-medium uppercase text-ink-500">{label}</p>
-      <p className="mt-2 text-3xl font-semibold leading-none tabular-nums text-ink-900">
-        {value.toLocaleString()}
-      </p>
-      {hint ? <p className="mt-2 text-xs leading-snug text-ink-500">{hint}</p> : null}
-    </>
-  )
-
-  const base = 'rounded-lg border border-ink-200 bg-white px-4 py-4 shadow-card'
-
-  return to ? (
-    <Link to={to} className={`${base} block transition-colors hover:border-brand-300`}>
-      {content}
-    </Link>
-  ) : (
-    <div className={base}>{content}</div>
   )
 }

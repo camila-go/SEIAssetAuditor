@@ -6,6 +6,7 @@ import { EmptyState, ErrorState, Skeleton } from '../components/States'
 import { useAsset, useAssets } from '../api/queries'
 import { formatBytes } from '../lib/format'
 import { MatchReasonBadge, SemanticNotice } from '../components/MatchReason'
+import { AssetPreview } from '../components/AssetPreview'
 
 /** `/assets` — search and browse everything indexed. */
 export default function Assets(): JSX.Element {
@@ -96,14 +97,9 @@ export default function Assets(): JSX.Element {
                 className="block h-full rounded-lg border border-ink-200 bg-white p-3 hover:border-brand-600"
               >
                 {asset.assetType === 'image' ? (
-                  <img
+                  <AssetPreview
                     src={asset.publicUrl}
-                    alt=""
-                    loading="lazy"
                     className="asset-preview mb-2 h-32 w-full rounded border border-ink-200 p-2"
-                    onError={(event) => {
-                      event.currentTarget.style.visibility = 'hidden'
-                    }}
                   />
                 ) : (
                   <div className="mb-2 flex h-32 items-center justify-center rounded bg-ink-100 text-label uppercase text-ink-500">

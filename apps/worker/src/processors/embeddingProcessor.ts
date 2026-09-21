@@ -1,5 +1,5 @@
 import type { Job } from 'bullmq'
-import { prisma } from '@capella/db'
+import { assetRepo, testimonialRepo } from '@capella/db'
 import type { EmbeddingJobPayload } from '@capella/queue'
 import { EMBEDDING_MODEL, embedBatch, humanizePath } from '@capella/embedding'
 import { logger } from '../lib/logger.js'
@@ -47,19 +47,7 @@ async function embedTestimonials(): Promise<number> {
   let processed = 0
 
   for (;;) {
-    const rows = await prisma.testimonial.findMany({
-      // NOT the whole predicate: `NOT (embedding_model = 'x')` evaluates to
-      // NULL for a row whose column IS NULL, and SQL drops NULL rows from a
-      // WHERE. Written the obvious way, the sweep silently skipped every row
-      // that had never been embedded — which is all of them.
-      where: {
-        deletedAt: null,
-        OR: [{ embeddingModel: null }, { embeddingModel: { not: EMBEDDING_MODEL } }],
-      },
-      select: { id: true, quoteText: true, studentName: true, program: true },
-      take: BATCH_SIZE,
-      orderBy: { id: 'asc' },
-    })
+    const rows = await testimonialRepo.findNeedingEmbedding(EMBEDDING_MODEL, BATCH_SIZE)
     if (rows.length === 0) break
 
     const texts = rows.map((row) =>
@@ -72,10 +60,7 @@ async function embedTestimonials(): Promise<number> {
     for (const [index, row] of rows.entries()) {
       const embedding = vectors[index]
       if (!embedding) continue
-      await prisma.testimonial.update({
-        where: { id: row.id },
-        data: { embedding, embeddingModel: EMBEDDING_MODEL, embeddedAt },
-      })
+      await testimonialRepo.setEmbedding(row.id, embedding, EMBEDDING_MODEL, embeddedAt)
       processed++
     }
   }
@@ -95,19 +80,7 @@ async function embedAssets(): Promise<number> {
   let processed = 0
 
   for (;;) {
-    const rows = await prisma.asset.findMany({
-      // NOT the whole predicate: `NOT (embedding_model = 'x')` evaluates to
-      // NULL for a row whose column IS NULL, and SQL drops NULL rows from a
-      // WHERE. Written the obvious way, the sweep silently skipped every row
-      // that had never been embedded — which is all of them.
-      where: {
-        deletedAt: null,
-        OR: [{ embeddingModel: null }, { embeddingModel: { not: EMBEDDING_MODEL } }],
-      },
-      select: { id: true, filename: true, aemPath: true, tags: true },
-      take: BATCH_SIZE,
-      orderBy: { id: 'asc' },
-    })
+    const rows = await assetRepo.findNeedingEmbedding(EMBEDDING_MODEL, BATCH_SIZE)
     if (rows.length === 0) break
 
     const texts = rows.map((row) => {
@@ -123,10 +96,7 @@ async function embedAssets(): Promise<number> {
     for (const [index, row] of rows.entries()) {
       const embedding = vectors[index]
       if (!embedding) continue
-      await prisma.asset.update({
-        where: { id: row.id },
-        data: { embedding, embeddingModel: EMBEDDING_MODEL, embeddedAt },
-      })
+      await assetRepo.setEmbedding(row.id, embedding, EMBEDDING_MODEL, embeddedAt)
       processed++
     }
   }

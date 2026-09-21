@@ -8,6 +8,7 @@ import { Skeleton } from './components/States'
  * downloads the internal audit tool's bundle.
  */
 const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Guide = lazy(() => import('./pages/Guide'))
 const StartAudit = lazy(() => import('./pages/StartAudit'))
 const AuditJob = lazy(() => import('./pages/AuditJob'))
 const Lookup = lazy(() => import('./pages/Lookup'))
@@ -38,6 +39,7 @@ export function App(): JSX.Element {
         {/* Internal */}
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />
+          <Route path="/guide" element={<Guide />} />
           <Route path="/audit" element={<StartAudit />} />
           <Route path="/audit/:jobId" element={<AuditJob />} />
           <Route path="/lookup" element={<Lookup />} />

@@ -70,12 +70,24 @@ export function Layout(): JSX.Element {
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
           <div className="flex h-14 items-center justify-between">
             <span className="text-sm font-semibold text-ink-900">SEI Site Auditor</span>
-            <a
-              href="/intake"
-              className="text-xs font-medium text-brand-600 hover:text-brand-700"
-            >
-              Submit a video →
-            </a>
+            <div className="flex items-center gap-4">
+              {/* Permanent, because "what is this for?" outlives the dashboard's
+                  first-run state — which disappears the moment an audit runs. */}
+              <NavLink
+                to="/guide"
+                className={({ isActive }) =>
+                  [
+                    'text-xs font-medium',
+                    isActive ? 'text-ink-900' : 'text-ink-500 hover:text-ink-800',
+                  ].join(' ')
+                }
+              >
+                How this works
+              </NavLink>
+              <a href="/intake" className="text-xs font-medium text-brand-600 hover:text-brand-700">
+                Submit a video →
+              </a>
+            </div>
           </div>
 
           {/* Five areas fit on a laptop but still overflow at 375px, where the
