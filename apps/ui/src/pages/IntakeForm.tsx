@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useIntakeConfig, useResubmissionTemplate } from '../api/queries'
 import { ErrorState, Skeleton } from '../components/States'
 import { formatBytes } from '../lib/format'
+import { apiUrl } from '../api/client'
 
 /**
  * `/intake` and `/intake/resubmit/:id` — the public submission form.
@@ -94,7 +95,7 @@ export default function IntakeForm(): JSX.Element {
 
     try {
       const result = await uploadWithProgress({
-        url: parentId ? `/api/v1/intake/${parentId}/resubmit` : '/api/v1/intake',
+        url: apiUrl(parentId ? `/intake/${parentId}/resubmit` : '/intake'),
         form,
         video,
         legalDoc,

@@ -5,7 +5,7 @@ import { PageHeader } from '../components/Layout'
 import { SubmissionStatusBadge } from '../components/StatusBadge'
 import { ErrorState, Skeleton } from '../components/States'
 import { useApprovalDecision, useSubmission } from '../api/queries'
-import { getApproverEmail } from '../api/client'
+import { apiUrl, getApproverEmail } from '../api/client'
 import { formatBytes, formatDate, formatDateTime, shortTimestamp, timestampToSeconds } from '../lib/format'
 
 /** `/admin/intake/:id` — review, transcript, and the approve/reject decision. */
@@ -45,7 +45,7 @@ export default function AdminIntakeDetail(): JSX.Element {
                 controls
                 preload="metadata"
                 className="w-full rounded-lg bg-black"
-                src={`/api/v1/intake/${data.id}/stream`}
+                src={apiUrl(`/intake/${data.id}/stream`)}
               >
                 <track kind="captions" />
               </video>
@@ -93,7 +93,7 @@ export default function AdminIntakeDetail(): JSX.Element {
               <div className="mt-3 border-t border-ink-200 pt-3">
                 {data.hasLegalDoc ? (
                   <a
-                    href={`/api/v1/intake/${data.id}/legal-doc`}
+                    href={apiUrl(`/intake/${data.id}/legal-doc`)}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-block rounded-md bg-white px-3 py-2 text-sm font-medium text-brand-700 ring-1 ring-ink-300 hover:bg-ink-50"
@@ -205,7 +205,7 @@ function TranscriptSection({
 
       {vttAemPath ? (
         <a
-          href={`/api/v1/intake/${submission.id}/captions`}
+          href={apiUrl(`/intake/${submission.id}/captions`)}
           className="mt-2 inline-block text-sm text-brand-700 hover:underline"
         >
           Download captions (.vtt)

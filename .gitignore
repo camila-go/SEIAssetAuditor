@@ -1,5 +1,9 @@
 node_modules/
 dist/
+# apps/ui's tsconfig emits declarations here. `dist/` does not match it, so 46
+# generated files were committed in the initial import and re-churned on every
+# build.
+dist-types/
 build/
 *.tsbuildinfo
 

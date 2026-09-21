@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { PageHeader } from '../components/Layout'
 import { StatusBadge } from '../components/StatusBadge'
 import { EmptyState, ErrorState, Skeleton } from '../components/States'
+import { apiUrl } from '../api/client'
 import {
   useAuditFailures,
   useAuditResults,
@@ -47,7 +48,7 @@ export default function AuditJob(): JSX.Element {
       <PageHeader title={`Audit ${jobId.slice(0, 8)}`} description={describeStatus(job.status)}>
         {job.status === 'complete' ? (
           <a
-            href={`/api/v1/audit/${jobId}/export`}
+            href={apiUrl(`/audit/${jobId}/export`)}
             className="rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"
           >
             Download CSV

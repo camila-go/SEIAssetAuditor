@@ -1,0 +1,25 @@
+# Without this, `COPY . .` ships 831MB of node_modules and an 87MB model cache
+# into the build context — and a stale host-built node_modules would shadow the
+# Linux binaries npm installs in the image (sharp and Playwright are native).
+node_modules
+**/node_modules
+.model-cache
+
+# Build output — regenerated inside the image.
+dist
+**/dist
+*.tsbuildinfo
+
+# Never let secrets into an image layer.
+.env
+.env.*
+legal-docs
+
+.git
+.github
+coverage
+playwright-report
+test-results
+apps/ui/e2e
+**/*.test.ts
+**/*.test.tsx

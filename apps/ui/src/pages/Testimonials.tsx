@@ -12,6 +12,7 @@ import { EmptyState, ErrorState, PhaseNotice, Skeleton } from '../components/Sta
 import { MatchReasonBadge, SemanticNotice } from '../components/MatchReason'
 import { useBuildSearchIndex, useSearchIndex, useTestimonial, useTestimonials } from '../api/queries'
 import { formatDate } from '../lib/format'
+import { apiUrl } from '../api/client'
 
 /**
  * `/testimonials` — one search box across quote text, student name and program.
@@ -55,7 +56,7 @@ export default function Testimonials(): JSX.Element {
         description="Every testimonial found on an audited page — both AEM components and hardcoded text."
       >
         <a
-          href="/api/v1/testimonials/export"
+          href={apiUrl('/testimonials/export')}
           className="rounded-md bg-white px-3 py-2 text-sm font-medium text-ink-700 ring-1 ring-ink-300 hover:bg-ink-50"
         >
           Export CSV

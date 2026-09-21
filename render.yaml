@@ -1,0 +1,172 @@
+# Render blueprint — the API, the worker, Postgres and Redis.
+#
+# The UI is NOT here; it deploys to Vercel from the same repo (see vercel.json).
+#
+# Why a container host and not a serverless one: `worker` is a persistent BullMQ
+# consumer that drives a real headless Chromium. It has no serverless shape —
+# an audit of 1000 URLs runs 60–90 minutes against function timeouts measured in
+# minutes, and Chromium alone is 359MB against a ~250MB bundle limit.
+#
+# Both services build the same Dockerfile and differ only in their start command.
+#
+# Nothing secret is in this file. Every value marked `sync: false` must be set in
+# the Render dashboard before the first deploy.
+
+services:
+  # ─── API ───────────────────────────────────────────────────────────────────
+  - type: web
+    name: sei-site-auditor-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter # 512MB. The embedding model alone holds ~90MB resident.
+    healthCheckPath: /health
+
+    # Migrations run once per deploy, before the new instance takes traffic.
+    # `migrate deploy` only applies committed migrations — it never generates or
+    # resets, so it cannot destroy data the way `migrate dev` can.
+    preDeployCommand: npx prisma migrate deploy --schema=packages/db/prisma/schema.prisma
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: API_PORT
+        value: 3001
+
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sei-site-auditor-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: sei-site-auditor-redis
+          property: connectionString
+
+      # Must be the exact Vercel origin, scheme included and no trailing slash.
+      # The UI sends VITE_API_ORIGIN at build time; if these two disagree every
+      # request dies in CORS preflight with no useful error in the UI.
+      - key: UI_ORIGIN
+        sync: false
+
+      - key: AEM_PUBLIC_HOST
+        value: https://www.capella.edu
+
+      # Phase 2 and 3 stay off until IT provisions the accounts. Everything
+      # gated returns a structured 501 rather than failing.
+      - key: AEM_API_ENABLED
+        value: false
+      - key: AEM_INTAKE_ENABLED
+        value: false
+      - key: TRANSCRIPTION_ENABLED
+        value: false
+      - key: SOCIAL_ENABLED
+        value: false
+
+      - key: APPROVAL_CHAIN_MODE
+        value: sequential
+
+      # Hybrid search. The model weights are baked into the image by
+      # `embed:prewarm`, so this needs no network at runtime and no API key.
+      - key: SEMANTIC_SEARCH_ENABLED
+        value: true
+
+      # Credentials — set in the dashboard, never here.
+      - key: AEM_SERVICE_ACCOUNT_USER
+        sync: false
+      - key: AEM_SERVICE_ACCOUNT_PASSWORD
+        sync: false
+      - key: AEM_INTAKE_WRITE_USER
+        sync: false
+      - key: AEM_INTAKE_WRITE_PASSWORD
+        sync: false
+      # Shared approver token — the placeholder standing in for SSO (PRD §11).
+      - key: INTERNAL_AUTH_TOKEN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: EMAIL_SMTP_HOST
+        sync: false
+      - key: EMAIL_SMTP_PORT
+        sync: false
+      - key: EMAIL_SMTP_USER
+        sync: false
+      - key: EMAIL_SMTP_PASSWORD
+        sync: false
+      - key: LEGAL_APPROVER_EMAIL
+        sync: false
+      - key: MARKETING_APPROVER_EMAIL
+        sync: false
+
+    # Signed legal PDFs are written to disk and are deliberately never sent to
+    # AEM. Without a disk they vanish on every deploy, and an approver opening
+    # "View signed document" gets a 404 for an agreement that was really filed.
+    disk:
+      name: legal-docs
+      mountPath: /var/capella-dam/legal-docs
+      sizeGB: 1
+
+  # ─── Worker ────────────────────────────────────────────────────────────────
+  - type: worker
+    name: sei-site-auditor-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: node apps/worker/dist/index.js
+
+    # Chromium is memory-hungry and SCRAPER_CONCURRENCY runs 5 pages at once.
+    # On the 512MB starter plan the OOM killer takes the browser mid-audit,
+    # which surfaces as every URL in a batch failing for no stated reason.
+    plan: standard
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sei-site-auditor-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: sei-site-auditor-redis
+          property: connectionString
+      - key: AEM_PUBLIC_HOST
+        value: https://www.capella.edu
+      - key: SCRAPER_CONCURRENCY
+        value: 5
+      - key: AEM_API_ENABLED
+        value: false
+      - key: AEM_INTAKE_ENABLED
+        value: false
+      - key: TRANSCRIPTION_ENABLED
+        value: false
+      - key: SOCIAL_ENABLED
+        value: false
+      - key: AEM_SERVICE_ACCOUNT_USER
+        sync: false
+      - key: AEM_SERVICE_ACCOUNT_PASSWORD
+        sync: false
+      - key: AEM_INTAKE_WRITE_USER
+        sync: false
+      - key: AEM_INTAKE_WRITE_PASSWORD
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+  # ─── Redis / key-value ─────────────────────────────────────────────────────
+  # BullMQ is not a cache: an evicted key is a lost audit job. `noeviction` makes
+  # Redis refuse writes when full instead of silently dropping queued work.
+  - type: keyvalue
+    name: sei-site-auditor-redis
+    plan: starter
+    maxmemoryPolicy: noeviction
+    ipAllowList: [] # private network only — never reachable from the internet
+
+databases:
+  - name: sei-site-auditor-db
+    databaseName: sei_site_auditor
+    plan: basic-256mb
+    postgresMajorVersion: "16"

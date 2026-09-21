@@ -5,7 +5,29 @@ import type { ApiErrorBody, PaginationMeta } from '@capella/types'
  * Every non-2xx response becomes an ApiError carrying the server's code.
  */
 
-const BASE_URL = '/api/v1'
+/**
+ * Where the API lives.
+ *
+ * Empty in development, so requests stay relative and Vite's dev proxy handles
+ * them — cookies and relative URLs then behave exactly as they do in
+ * production. In a split deployment (UI on a static host, API on a container
+ * host) `VITE_API_ORIGIN` is set at build time to the API's origin, and the API
+ * must allow that UI origin via its own `UI_ORIGIN` — the two have to agree or
+ * every request fails CORS preflight.
+ *
+ * Trailing slashes are stripped because `https://host/` + `/api/v1` is a double
+ * slash, which some proxies treat as a different path and will 404 on.
+ */
+const API_ORIGIN = (import.meta.env.VITE_API_ORIGIN ?? '').replace(/\/+$/, '')
+
+/** Absolute URL for an API path. Needed wherever the browser, not `fetch`,
+ * does the request: `<a href>` downloads, `<video src>`, form posts. Those
+ * cannot be relative once the API is on another origin. */
+export function apiUrl(path: string): string {
+  return `${API_ORIGIN}/api/v1${path.startsWith('/') ? path : `/${path}`}`
+}
+
+const BASE_URL = `${API_ORIGIN}/api/v1`
 
 export class ApiError extends Error {
   readonly code: string
