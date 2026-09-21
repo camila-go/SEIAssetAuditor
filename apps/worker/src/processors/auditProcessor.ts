@@ -1,10 +1,44 @@
 import type { Job } from 'bullmq'
 import { assetRepo, auditJobRepo, pageRepo, prisma, testimonialRepo } from '@capella/db'
-import type { AuditJobPayload } from '@capella/queue'
+import { enqueueEmbedding, enqueuePhash, type AuditJobPayload } from '@capella/queue'
 import { extractDegreeLevel, fingerprint, scrapeBatch } from '@capella/scraper'
 import type { ScrapedPage, ScraperConfig } from '@capella/types'
 import { config } from '../config.js'
 import { logger } from '../lib/logger.js'
+
+/**
+ * Queue the follow-up sweeps that make newly-found assets searchable.
+ *
+ * An audit discovers assets; it does not fingerprint or embed them. Until this
+ * ran, every audit left the index quietly behind — new images had no pHash, so
+ * reverse image search and duplicate detection could not see them, and new rows
+ * had no embedding, so meaning-based search could not either. Both were only
+ * corrected by someone remembering to run `npm run crawl` by hand, and twice in
+ * one session they were not: coverage sat at 9 of 58 images and 14 of 65 assets
+ * without anything reporting a problem.
+ *
+ * Deliberately enqueued rather than run inline. `.claude/rules/backend.md`
+ * requires pHash to stay off the scraping path, and it is right to: fingerprinting
+ * downloads every image again, which has no business holding up an audit or
+ * sharing its retry semantics.
+ *
+ * Failures here are logged and swallowed. The audit itself has already
+ * succeeded and been marked complete; throwing now would fail a finished job,
+ * BullMQ would retry the whole thing, and the sweeps are idempotent catch-ups
+ * that the next audit — or a manual `npm run crawl` — would queue anyway.
+ */
+async function scheduleIndexing(jobId: string): Promise<void> {
+  try {
+    await enqueuePhash(config.redisUrl, {})
+    await enqueueEmbedding(config.redisUrl, {})
+    logger.info({ jobId }, 'Queued pHash and embedding sweeps for newly indexed assets')
+  } catch (error) {
+    logger.error(
+      { err: error, jobId },
+      'Could not queue the follow-up sweeps — new assets stay unfingerprinted until the next audit or `npm run crawl`',
+    )
+  }
+}
 
 /**
  * Audit job processor.
@@ -104,6 +138,8 @@ export async function processAuditJob(job: Job<AuditJobPayload>): Promise<void> 
 
     await auditJobRepo.markComplete(jobId)
     logger.info({ jobId }, 'Audit job complete')
+
+    await scheduleIndexing(jobId)
   } catch (error) {
     // Reaching here means something outside per-URL handling broke (Redis, the
     // browser, the DB). BullMQ retries; the pending rows are still pending.

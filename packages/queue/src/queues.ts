@@ -21,10 +21,25 @@ const AUDIT_JOB_OPTIONS: JobsOptions = {
   removeOnFail: false,
 }
 
+/**
+ * The pHash sweep coalesces, for the same reason the embedding sweep does.
+ *
+ * It is now enqueued automatically whenever an audit completes, so several
+ * audits finishing close together would otherwise stack several sweeps. They
+ * would all claim the same `findNeedingPhash` rows and download the same images
+ * from capella.edu concurrently — wasteful, and impolite to a site we do not
+ * own.
+ *
+ * `removeOnComplete: true` is load-bearing with a fixed id, not tidiness:
+ * BullMQ rejects a duplicate id against a *completed* job too, so retaining
+ * them would make the id permanently taken and silently no-op every later
+ * sweep. That exact bug already cost a debugging session on the embedding
+ * queue.
+ */
 const PHASH_JOB_OPTIONS: JobsOptions = {
   attempts: 2,
   backoff: { type: 'fixed', delay: 10_000 },
-  removeOnComplete: { age: 24 * 60 * 60, count: 1_000 },
+  removeOnComplete: true,
   removeOnFail: { age: 7 * 24 * 60 * 60 },
 }
 
@@ -94,7 +109,13 @@ export async function enqueueAudit(redisUrl: string, payload: AuditJobPayload): 
 }
 
 export async function enqueuePhash(redisUrl: string, payload: PhashJobPayload): Promise<void> {
-  await getQueues(redisUrl).phash.add(JOB_NAMES.computePhash, payload, PHASH_JOB_OPTIONS)
+  await getQueues(redisUrl).phash.add(JOB_NAMES.computePhash, payload, {
+    ...PHASH_JOB_OPTIONS,
+    // One sweep at a time — see PHASH_JOB_OPTIONS. A sweep already queued will
+    // pick up anything an audit finishing right now adds, because it reads the
+    // rows needing work when it runs, not when it is queued.
+    jobId: 'phash-sweep',
+  })
 }
 
 export async function enqueueTranscription(

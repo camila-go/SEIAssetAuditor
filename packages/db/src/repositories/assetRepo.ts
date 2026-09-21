@@ -164,7 +164,22 @@ export async function countReferences(assetId: string): Promise<number> {
 /** Assets that still need a pHash computed — fed to the pHash background job. */
 export async function findNeedingPhash(limit: number): Promise<Asset[]> {
   return prisma.asset.findMany({
-    where: { phash: null, assetType: 'image', deletedAt: null },
+    where: {
+      assetType: 'image',
+      deletedAt: null,
+      // BOTH must be null, matching `countHashedImages`. Selecting on `phash`
+      // alone re-selected every white-on-transparent logo on every sweep: those
+      // rows have `phash = null` *by design*, because flattening them onto white
+      // yields a blank square whose hash identifies nothing, so only the
+      // black-flattened `phashAlt` is kept. They are fully searchable, yet the
+      // sweep kept re-downloading and re-hashing them forever.
+      //
+      // Invisible while the sweep was manual and occasional. It became real
+      // waste against a site we do not own once every completed audit started
+      // queueing one — the first run after that change considered 18 images
+      // when only 8 could possibly need work.
+      AND: [{ phash: null }, { phashAlt: null }],
+    },
     take: limit,
     orderBy: { createdAt: 'asc' },
   })

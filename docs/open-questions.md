@@ -341,3 +341,42 @@ unreachable? If it is deliberate, full reverse-image coverage needs the AEM read
 account rather than public HTTP, and that should be said plainly in the readiness
 assessment. If it is an oversight in the dispatcher rules, it is a one-line fix
 on their side.
+
+
+## Fingerprinting now runs itself (2026-09-21)
+
+An audit discovers assets; it never fingerprinted or embedded them. Both sweeps
+had to be started by hand with `npm run crawl`, and twice in one session nobody
+did — coverage sat at 9 of 58 images and 14 of 65 assets with nothing reporting
+a problem. Reverse image search and duplicate detection simply could not see the
+newest assets, and neither could meaning-based search.
+
+A completed audit now queues both sweeps. Verified end to end on two fresh
+pages with no manual step: pHash 56/58 → 62/64, embeddings 65/65 → 72/72.
+
+Still enqueued, never inline. `.claude/rules/backend.md` is right to forbid
+fingerprinting on the scraping path — it re-downloads every image, which has no
+business holding up an audit or sharing its retry semantics. A failure to
+enqueue is logged and swallowed: the audit has already succeeded, and throwing
+would fail a finished job and make BullMQ retry the whole thing.
+
+**Two bugs this surfaced immediately**, both invisible while the sweep was manual:
+
+- `enqueuePhash` had no job id, so nothing coalesced. Several audits finishing
+  together would have stacked concurrent sweeps, all claiming the same rows and
+  downloading the same images from capella.edu at once. Now pinned to
+  `phash-sweep` with `removeOnComplete: true` — the same pairing the embedding
+  queue already needed, for the same reason.
+- `findNeedingPhash` selected on `phash: null`, but `countHashedImages` counts a
+  row as hashed if *either* hash exists. White-on-transparent logos keep
+  `phash = null` by design — their white-flattened hash is a blank square — so
+  every sweep re-selected and re-downloaded all ten of them, forever. The first
+  automatic run considered 18 images when only 8 could need work; after aligning
+  the two definitions it considers 2.
+
+**Open, and it grows with scale:** those remaining 2 are the `/content/dam/vc/`
+images the dispatcher returns 403 for. They have no hash, so every sweep retries
+them. Bounded and harmless at 2, but if a whole tree stays unfetchable this
+becomes hundreds of pointless downloads per audit. The fix is a failed-attempt
+count with backoff, so a permanently unreachable asset stops being retried
+without being confused for one that has simply not been reached yet.
