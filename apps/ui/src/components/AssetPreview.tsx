@@ -31,7 +31,12 @@ export function AssetPreview({
   className = '',
   label = 'Not publicly served',
 }: AssetPreviewProps): JSX.Element {
-  const [failed, setFailed] = useState(false)
+  // Keyed by `src` so a new asset always starts un-failed. Every current call
+  // site happens to key its list by asset id, which remounts this component and
+  // masks the problem — but that is incidental. Without this, reusing one
+  // instance for a second asset would keep showing the first one's fallback.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
+  const failed = failedSrc === src
 
   if (failed) {
     return (
@@ -53,7 +58,7 @@ export function AssetPreview({
       alt={alt}
       loading="lazy"
       className={className}
-      onError={() => setFailed(true)}
+      onError={() => setFailedSrc(src)}
     />
   )
 }

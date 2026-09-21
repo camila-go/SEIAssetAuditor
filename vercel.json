@@ -4,5 +4,10 @@
   "outputDirectory": "apps/ui/dist",
   "installCommand": "npm install",
   "framework": null,
-  "rewrites": [{ "source": "/((?!assets/).*)", "destination": "/index.html" }]
+  "rewrites": [
+    {
+      "source": "/((?!api/|assets/).*)",
+      "destination": "/index.html"
+    }
+  ]
 }

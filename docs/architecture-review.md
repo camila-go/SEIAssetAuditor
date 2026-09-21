@@ -138,3 +138,75 @@ run by hand, "audit a set of pages" stops deserving the widest tile.
 3. [x] Recent audits moved below the task grid — it is history
 4. [x] Verified at 1280px and 375px, no horizontal overflow
 5. [ ] Revisit tile order once there is real usage data
+
+
+---
+
+# Self-review of the above changes — 2026-09-21
+
+Four defects found by reviewing the session's own diff. All four were introduced
+by that diff, not pre-existing.
+
+## 1. Migrations would not have run (deploy-blocking)
+
+`render.yaml` ran `npx prisma migrate deploy` as a pre-deploy step inside the
+built container — but `prisma` was a devDependency and the runtime stage installs
+with `--omit=dev`. The CLI simply was not there. `npx` would then try to fetch it
+from the network mid-deploy: a hard failure on a restricted host, or a silent
+version mismatch against the lockfile.
+
+The confusing part is that it would not have looked like a migration problem. The
+deploy fails at a step most people skim, and the app that follows it starts
+against a schema-less database.
+
+Fixed by moving `prisma` to a root `dependencies` block. It is genuinely a
+runtime dependency of the deployed image now, so that is where it belongs.
+
+## 2. The SPA fallback swallowed `/api`
+
+`vercel.json` rewrote `/((?!assets/).*)` to `/index.html`, which matches
+`/api/v1/anything`. If `VITE_API_ORIGIN` were ever unset or misspelled in
+production, every API call would return the app's own HTML with a **200**, and
+the UI's error path would report "Server returned a non-JSON response (HTTP
+200)" on every screen.
+
+A misconfiguration that produces 200s is far worse than one that produces 404s —
+it looks like a bug in the application. Now excluded, so an unset origin fails
+where the mistake actually is.
+
+## 3. The landing page carried an O(n²) query
+
+The duplicates tile showed a live group count, which meant calling `/duplicates`
+on every dashboard load. That endpoint compares every hashed image against every
+other one: 1,540 comparisons at today's 56 images (~6ms, measured), but ~500,000
+at a thousand images and ~50,000,000 at ten thousand.
+
+Fast today, quietly quadratic as the index grows, and on the one page everybody
+opens. The metric is removed; the tile stands without it.
+
+**Follow-up:** a cheap `GET /duplicates/count` — or reusing the two indexed
+`count()` queries already behind pHash coverage — would let the number come back
+without the pairwise scan.
+
+## 4. A failed thumbnail could persist onto the next asset
+
+`AssetPreview` stored failure as a plain boolean, so an instance reused for a
+different `src` would keep showing the previous asset's "not publicly served"
+placeholder.
+
+Worth recording that **I could not reproduce this.** Every current call site
+either keys its list by asset id or unmounts the block while loading, so the
+component always remounts. The bug was real but masked by circumstance — and the
+circumstance is incidental, not a guarantee. Fixed by storing *which* `src`
+failed rather than a bare flag.
+
+## Two things checked and cleared
+
+- **An infinite loop in the embedding sweep.** The batch loop only advances by
+  rows getting `embeddingModel` set, and a row is skipped when its vector is
+  missing — so a short vector array would spin forever. Traced `embedBatch`: it
+  maps over its input, so the lengths cannot diverge. Not reachable.
+- **Missing Tailwind shades.** A script suggested ten `ink-*` classes were
+  undeclared. The script's regex was at fault; grepping the built CSS confirmed
+  every class is present. Reported here because a false positive that survives
+  into a review is worse than one that never happens.

@@ -35,6 +35,10 @@
     "crawl": "tsx apps/worker/src/scripts/manualCrawl.ts",
     "embed:prewarm": "npm run build --workspace=@capella/embedding && node packages/embedding/prewarm.mjs"
   },
+  "//dependencies": "The prisma CLI is a RUNTIME dependency of the deployed image, not just a build tool: render.yaml runs `prisma migrate deploy` as a pre-deploy step inside the built container, where the runtime stage installs with --omit=dev. As a devDependency it was absent there, so npx would have tried to fetch it from the network mid-deploy \u2014 failing on a restricted host, or silently pulling a version that does not match the lockfile.",
+  "dependencies": {
+    "prisma": "^5.15.0"
+  },
   "devDependencies": {
     "@types/jest": "^29.5.12",
     "@types/node": "^20.14.0",
@@ -43,7 +47,6 @@
     "concurrently": "^8.2.2",
     "eslint": "^8.57.0",
     "jest": "^29.7.0",
-    "prisma": "^5.15.0",
     "ts-jest": "^29.1.4",
     "tsx": "^4.15.0",
     "typescript": "^5.4.5"

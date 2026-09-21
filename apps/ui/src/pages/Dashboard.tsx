@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { PageHeader } from '../components/Layout'
 import { CardSkeleton, ErrorState } from '../components/States'
 import { TaskGrid, type Task } from '../components/TaskGrid'
-import { useAuditJobs, useDashboardStats, useDuplicates, type AuditJobSummary, type DashboardStats } from '../api/queries'
+import { useAuditJobs, useDashboardStats, type AuditJobSummary, type DashboardStats } from '../api/queries'
 import { useAuditStore } from '../store/auditStore'
 import { formatDateTime } from '../lib/format'
 
@@ -28,7 +28,6 @@ import { formatDateTime } from '../lib/format'
 export default function Dashboard(): JSX.Element {
   const stats = useDashboardStats()
   const jobs = useAuditJobs(5)
-  const duplicates = useDuplicates(DUPLICATE_THRESHOLD)
   const recentJobs = useAuditStore((state) => state.recentJobs)
 
   const allJobs = jobs.data ?? []
@@ -110,7 +109,7 @@ export default function Dashboard(): JSX.Element {
         {stats.isError ? (
           <ErrorState error={stats.error} onRetry={() => void stats.refetch()} />
         ) : (
-          <TaskGrid tasks={buildTasks(stats.data, duplicates.data?.groups.length)} />
+          <TaskGrid tasks={buildTasks(stats.data)} />
         )}
       </section>
 
@@ -163,9 +162,6 @@ export default function Dashboard(): JSX.Element {
   )
 }
 
-/** Matches the default the duplicates view itself uses, so the count agrees. */
-const DUPLICATE_THRESHOLD = 10
-
 /**
  * The tiles, with live figures attached.
  *
@@ -173,7 +169,7 @@ const DUPLICATE_THRESHOLD = 10
  * indexed assets" tells someone whether an answer can be trusted yet, which a
  * bare "65" does not.
  */
-function buildTasks(stats: DashboardStats | undefined, duplicateGroups: number | undefined): Task[] {
+function buildTasks(stats: DashboardStats | undefined): Task[] {
   const assets = stats?.assets.totalAssets ?? 0
   const pages = stats?.assets.totalPages ?? 0
   const testimonials = stats?.testimonials.totalTestimonials ?? 0
@@ -206,13 +202,12 @@ function buildTasks(stats: DashboardStats | undefined, duplicateGroups: number |
       body: 'Groups images that are visually the same, including renamed and re-exported copies.',
       to: '/duplicates',
       span: 'half',
-      metric:
-        duplicateGroups === undefined
-          ? undefined
-          : {
-              value: duplicateGroups.toLocaleString(),
-              label: duplicateGroups === 1 ? 'group found' : 'groups found',
-            },
+      // Deliberately no metric. Showing a live group count meant calling
+      // /duplicates on every dashboard load, and that endpoint compares every
+      // hashed image against every other one: 1,540 comparisons at today's 56
+      // images, but ~50 million at ten thousand. That is not a cost the landing
+      // page should carry to display one number. A cheap count endpoint would
+      // bring it back — see docs/architecture-review.md.
     },
     {
       title: 'Review video submissions',
