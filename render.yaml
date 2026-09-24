@@ -18,7 +18,11 @@ services:
     name: sei-site-auditor-api
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter # 512MB. The embedding model alone holds ~90MB resident.
+    # 0.5c-512mb is too tight: the sentence-embedding model holds ~90MB
+    # resident before Node, Prisma and sharp. Plan names here are Render's
+    # current compute identifiers — `starter` and `standard` are the old names
+    # and are rejected outright by the blueprint parser.
+    plan: 1c-2g
     healthCheckPath: /health
 
     # Migrations run once per deploy, before the new instance takes traffic.
@@ -115,9 +119,9 @@ services:
     dockerCommand: node apps/worker/dist/index.js
 
     # Chromium is memory-hungry and SCRAPER_CONCURRENCY runs 5 pages at once.
-    # On the 512MB starter plan the OOM killer takes the browser mid-audit,
+    # On the 0.5c-512mb default the OOM killer takes the browser mid-audit,
     # which surfaces as every URL in a batch failing for no stated reason.
-    plan: standard
+    plan: 2c-4g
 
     envVars:
       - key: NODE_ENV
@@ -161,12 +165,20 @@ services:
   # Redis refuse writes when full instead of silently dropping queued work.
   - type: keyvalue
     name: sei-site-auditor-redis
-    plan: starter
+    plan: free
     maxmemoryPolicy: noeviction
     ipAllowList: [] # private network only — never reachable from the internet
 
 databases:
   - name: sei-site-auditor-db
     databaseName: sei_site_auditor
-    plan: basic-256mb
-    postgresMajorVersion: "16"
+    # Deliberately not `free`: Render deletes a free Postgres after 30 days, and
+    # a demo that silently loses its index a month in is worse than one that
+    # costs a few dollars. 256MB is ample for this data — 665 assets with 384-float
+    # embeddings is single-digit MB — but revisit it before a full-site crawl.
+    plan: 0.1c-256mb
+    postgresMajorVersion: "17"
+    # No external connections. Nothing outside Render's private network needs to
+    # reach this, and the tool's whole threat model is that it holds AEM
+    # credentials and a map of the site.
+    ipAllowList: []

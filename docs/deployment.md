@@ -26,15 +26,35 @@ The UI is genuinely a good fit for Vercel, so it stays there.
 
 ### 1. Backend — Render
 
-Point Render at this repo; it reads `render.yaml` and creates four resources:
-the API, the worker, Postgres 16, and Redis. `DATABASE_URL` and `REDIS_URL` are
-wired automatically.
+Render → **New** → **Blueprint** → pick this repo. It reads `render.yaml` and
+creates four resources: the API (web), the worker, Postgres 17, and a Key Value
+(Redis) instance. `DATABASE_URL` and `REDIS_URL` are wired between them
+automatically — you never paste a connection string.
+
+The plans in the blueprint are Render's current compute identifiers. The older
+names (`starter`, `standard`, `basic-256mb`) are rejected by the blueprint
+parser, so this file was corrected against the spec before first use:
+
+| Resource | Plan | Why that one |
+|---|---|---|
+| API | `1c-2g` | The sentence-embedding model holds ~90MB resident before Node, Prisma and sharp. `0.5c-512mb` is too tight. |
+| Worker | `2c-4g` | Chromium at `SCRAPER_CONCURRENCY=5`. On a smaller plan the OOM killer takes the browser mid-audit, and it surfaces as every URL in a batch failing for no stated reason. |
+| Key Value | `free` | BullMQ stores job metadata, not payloads. |
+| Postgres | `0.1c-256mb` | **Not `free`** — Render deletes a free Postgres after 30 days, and a demo that silently loses its index a month in is worse than one that costs a few dollars. |
+
+Postgres and Key Value both have `ipAllowList: []`, which blocks all external
+connections. Nothing outside Render's private network needs to reach either, and
+this tool holds AEM credentials and a map of the site.
 
 Set the values marked `sync: false` in the dashboard **before** the first
 deploy. Only two matter to get a running Phase 1 tool:
 
 - `UI_ORIGIN` — the Vercel URL, exactly, scheme included, no trailing slash
-- `INTERNAL_AUTH_TOKEN` — any long random string; it gates the `/admin` routes
+- `INTERNAL_AUTH_TOKEN` — any long random string; it gates the `/admin` routes.
+  Generate one with `node -e "console.log(require('crypto').randomBytes(36).toString('base64url'))"`
+
+Set them on **both** the API and the worker where both lists include them — the
+worker needs the AEM credentials, the API needs `UI_ORIGIN`.
 
 Every AEM and API credential can stay unset. Phase 2 and 3 return a structured
 `501` and the UI shows an explanatory notice.
