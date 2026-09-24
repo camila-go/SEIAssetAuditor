@@ -22,6 +22,10 @@ serverless host **no audit would ever run**, however green the build went.
 
 The UI is genuinely a good fit for Vercel, so it stays there.
 
+> **Doing it right now?** [`deploy-runbook.md`](./deploy-runbook.md) is the
+> click-by-click version — exact menus, exact values, what to check at each
+> step. This page is the reasoning behind it.
+
 ## First deploy
 
 ### 1. Backend — Render

@@ -238,6 +238,9 @@ failure never blocks the approval workflow.
 
 ## Before this can go live
 
+0. **Deploy it** — [`docs/deploy-runbook.md`](./docs/deploy-runbook.md) is a
+   click-by-click walkthrough of Render and Vercel. Nothing in it needs AEM
+   credentials.
 1. **IT must grant the two service accounts** — see
    [`docs/dam-permissions.md`](./docs/dam-permissions.md), written as a request
    you can hand over directly.
