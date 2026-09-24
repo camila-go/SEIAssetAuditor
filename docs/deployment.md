@@ -48,11 +48,22 @@ applies committed migrations — it can never reset the database the way
 Same repo, **Root Directory left at the repository root**. `vercel.json` does
 the rest: it runs `npm run build:ui` and serves `apps/ui/dist`.
 
-> If the Vercel project's Root Directory is set to `apps/api` or `apps/ui`, the
-> build fails with `tsc: command not found`. `typescript` is a root
-> devDependency of the workspace — pointing Vercel inside a workspace means it
-> never installs the root, so no `tsc`. That is the original error in this
-> repo's history.
+> **The Root Directory must be the repository root.** This has now broken the
+> build twice, with two different-looking errors and one cause:
+>
+> | Error | What it actually means |
+> |---|---|
+> | `sh: tsc: command not found` | Root Directory is inside a workspace, so npm never installed the workspace root — and `typescript` is a root devDependency |
+> | `npm error Missing script: "build:ui"` + `location /vercel/path0/apps/api` | Same thing. `build:ui` is defined in the root `package.json`, not in `apps/api` |
+>
+> The giveaway in both is the `location` line: if it ends in `/apps/api` or
+> `/apps/ui`, the Root Directory is wrong regardless of what the error says.
+>
+> No repository change can work around this. With the Root Directory inside a
+> workspace, `outputDirectory: apps/ui/dist` resolves to
+> `apps/api/apps/ui/dist`, which will never exist. Set it to the repository
+> root and leave Build Command and Output Directory blank so `vercel.json`
+> supplies them.
 
 Set one environment variable:
 
