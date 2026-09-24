@@ -8,8 +8,13 @@ import {
   type AuditJobStatusResponse,
   type AuditResultRow,
   type LiveStatus,
+  normalizeUrl,
 } from '@capella/types'
 import { config } from '../config.js'
+
+// Re-exported: the URL rules moved to @capella/types so the UI shares them,
+// but this stays the import site everything here already uses.
+export { normalizeUrl }
 
 /**
  * Audit orchestration. The API's only job here is to turn input into
@@ -31,15 +36,32 @@ export interface CreateAuditResult {
   jobId: string
   status: 'queued'
   totalUrls: number
+  /**
+   * Input lines that are not page addresses, verbatim and capped.
+   *
+   * Dropping them silently is the failure this tool exists to avoid: paste
+   * three URLs and five filenames and you would get a job for three, with
+   * nothing saying the other five were ignored. Returned so the UI can name
+   * them back.
+   */
+  skipped: string[]
 }
 
+/** Enough to recognise the mistake without turning the response into the input. */
+const MAX_REPORTED_SKIPS = 25
+
 export async function createAudit(input: CreateAuditInput): Promise<CreateAuditResult> {
-  const urls = await resolveUrls(input.inputType, input.rawInput)
+  const { urls, skipped } = await resolveUrls(input.inputType, input.rawInput)
 
   if (urls.length === 0) {
+    // Name what was rejected. "No valid URLs" against a list that plainly looks
+    // like a list is the least useful thing this could say.
+    const examples = skipped.slice(0, 3).join(', ')
     throw new AppError(
       ERROR_CODES.NO_URLS_PROVIDED,
-      'No valid URLs found. Provide at least one http(s) URL.',
+      skipped.length > 0
+        ? `No valid URLs found. ${skipped.length} line${skipped.length === 1 ? '' : 's'} could not be read as a web address${examples ? ` — for example: ${examples}` : ''}. Filenames and DAM paths are not page URLs; paste the page each one appears on instead.`
+        : 'No valid URLs found. Provide at least one http(s) URL.',
     )
   }
 
@@ -65,10 +87,21 @@ export async function createAudit(input: CreateAuditInput): Promise<CreateAuditR
     )
   }
 
-  return { jobId: job.id, status: 'queued', totalUrls: job.totalUrls }
+  return {
+    jobId: job.id,
+    status: 'queued',
+    totalUrls: job.totalUrls,
+    skipped: skipped.slice(0, MAX_REPORTED_SKIPS),
+  }
 }
 
-async function resolveUrls(inputType: AuditInputType, rawInput: string): Promise<string[]> {
+export interface ParsedUrls {
+  urls: string[]
+  /** Input that is not a page address, in the order it appeared. */
+  skipped: string[]
+}
+
+async function resolveUrls(inputType: AuditInputType, rawInput: string): Promise<ParsedUrls> {
   switch (inputType) {
     case 'paste':
       return parseUrlList(rawInput)
@@ -79,22 +112,32 @@ async function resolveUrls(inputType: AuditInputType, rawInput: string): Promise
       if (!sitemapUrl) {
         throw new AppError(ERROR_CODES.INVALID_URL, 'Sitemap URL is not a valid http(s) URL')
       }
+      // A sitemap is machine-generated: an entry that does not parse is the
+      // site's problem, not a user typo, so it is not reported back as a typo.
       const urls = await fetchSitemapUrls(sitemapUrl, config.scraper.userAgent)
-      return urls.map(normalizeUrl).filter((url): url is string => url !== null)
+      return {
+        urls: [...new Set(urls.map(normalizeUrl).filter((url): url is string => url !== null))],
+        skipped: [],
+      }
     }
   }
 }
 
 /** One URL per line. Blank lines and `#` comments are ignored. */
-export function parseUrlList(raw: string): string[] {
-  const urls = raw
-    .split(/[\r\n]+/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith('#'))
-    .map(normalizeUrl)
-    .filter((url): url is string => url !== null)
+export function parseUrlList(raw: string): ParsedUrls {
+  const urls: string[] = []
+  const skipped: string[] = []
 
-  return [...new Set(urls)]
+  for (const line of raw.split(/[\r\n]+/)) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+
+    const normalized = normalizeUrl(trimmed)
+    if (normalized) urls.push(normalized)
+    else skipped.push(trimmed)
+  }
+
+  return { urls: [...new Set(urls)], skipped }
 }
 
 /**
@@ -104,23 +147,30 @@ export function parseUrlList(raw: string): string[] {
  * we take the first cell that parses as a URL rather than requiring a header or
  * a strict column position. A header row simply yields no URL and is skipped.
  */
-export function parseCsvUrls(raw: string): string[] {
+export function parseCsvUrls(raw: string): ParsedUrls {
   const urls: string[] = []
+  const skipped: string[] = []
 
   for (const line of raw.split(/[\r\n]+/)) {
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith('#')) continue
 
+    let found = false
     for (const cell of splitCsvLine(trimmed)) {
       const normalized = normalizeUrl(cell.trim().replace(/^"|"$/g, ''))
       if (normalized) {
         urls.push(normalized)
+        found = true
         break
       }
     }
+
+    // No cell on this row was a URL. Report the row, not each cell — a DAM
+    // export has many columns and naming them all would bury the point.
+    if (!found) skipped.push(trimmed)
   }
 
-  return [...new Set(urls)]
+  return { urls: [...new Set(urls)], skipped }
 }
 
 /** Split on commas that are not inside double quotes. */
@@ -144,45 +194,6 @@ function splitCsvLine(line: string): string[] {
   cells.push(current)
 
   return cells
-}
-
-/** Anything of the form `scheme:` at the start — not just http. */
-const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i
-/** A bare host: no whitespace, and at least one dot with a plausible TLD. */
-const LOOKS_LIKE_HOST = /^[^\s/]+\.[a-z]{2,}(?:[:/?#]|$)/i
-
-/**
- * Normalize one URL, or return null if it isn't a page address.
- *
- * Bare hosts get `https://` assumed, but only when they actually look like a
- * host. Prefixing unconditionally is a trap: it turns `ftp://example.com` into
- * `https://ftp//example.com` and a CSV header cell like `title` into
- * `https://title/` — both of which then get queued and scraped.
- */
-export function normalizeUrl(value: string): string | null {
-  const trimmed = value.trim()
-  if (!trimmed) return null
-
-  // An explicit scheme is honoured as written, so a non-http one is rejected
-  // rather than rewritten.
-  const candidate = HAS_SCHEME.test(trimmed)
-    ? trimmed
-    : LOOKS_LIKE_HOST.test(trimmed)
-      ? `https://${trimmed}`
-      : null
-
-  if (candidate === null) return null
-
-  try {
-    const url = new URL(candidate)
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
-    if (!url.hostname.includes('.')) return null
-    // A fragment identifies a position within a page, not a distinct page.
-    url.hash = ''
-    return url.toString()
-  } catch {
-    return null
-  }
 }
 
 function defaultJobName(inputType: AuditInputType, count: number): string {

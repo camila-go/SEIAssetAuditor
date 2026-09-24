@@ -119,6 +119,8 @@ export interface CreateAuditResult {
   jobId: string
   status: 'queued'
   totalUrls: number
+  /** Input lines that were not page addresses. Empty when everything parsed. */
+  skipped: string[]
 }
 
 export function useCreateAudit() {

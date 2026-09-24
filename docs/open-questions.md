@@ -382,3 +382,41 @@ them. Bounded and harmless at 2, but if a whole tree stays unfetchable this
 becomes hundreds of pointless downloads per audit. The fix is a failed-attempt
 count with backoff, so a permanently unreachable asset stops being retried
 without being confused for one that has simply not been reached yet.
+
+
+## Filenames were being turned into hostnames (found 2026-09-24)
+
+Reported from a real audit: five URLs failed with
+`net::ERR_NAME_NOT_RESOLVED`, for addresses like `https://kristen_moris.jpg/`.
+
+Those were never URLs. They were filenames — almost certainly a column pasted
+from a DAM export — and `normalizeUrl` prefixed `https://` and treated the
+filename as a host. `LOOKS_LIKE_HOST` asked only for a dot followed by two or
+more letters, which `capella.edu` and `kristen_moris.jpg` satisfy equally well.
+The comment above it claimed "a plausible TLD" and never checked that the
+ending was a TLD rather than a file extension.
+
+This is the second time the same normalizer has invented an address. The first
+was a CSV header cell — `title` became `https://title/` — and the fix then
+added the dot requirement, which this case walks straight through.
+
+Three changes, because the parsing bug was the smallest part of it:
+
+- **Filenames are rejected.** Only the host portion is tested, so
+  `example.com/photo.jpg` and an explicit `https://.../photo.jpg` are unaffected.
+- **Skipped input is named back.** Rejecting silently would have been worse than
+  the original bug: paste three URLs and five filenames and you would get a job
+  of three with nothing saying the rest were dropped. The audit page now lists
+  what was left out, and an all-filename paste gets an error that names examples
+  instead of "No valid URLs found".
+- **The rule moved to `@capella/types`.** The form counted non-blank lines while
+  the API decided what to queue, so the preview read "6 URLs detected" for five
+  filenames and one address. Same fix as `parseSearchTerms`: one rule, one
+  place. The form now warns before submitting, which is where the mistake is
+  actually made.
+
+**The deeper pattern, now three for three:** every one of this tool's worst bugs
+has been input that carried no signal being confidently turned into an answer —
+a degenerate pHash matching every white logo, a semantic threshold matching
+every Capella asset, and now a filename becoming a hostname. The shape to watch
+for is a permissive rule with a comment claiming it is strict.

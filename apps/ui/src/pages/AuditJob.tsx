@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import { PageHeader } from '../components/Layout'
 import { StatusBadge } from '../components/StatusBadge'
 import { EmptyState, ErrorState, Skeleton } from '../components/States'
@@ -19,6 +19,13 @@ import {
  */
 export default function AuditJob(): JSX.Element {
   const { jobId = '' } = useParams<{ jobId: string }>()
+
+  // Set by StartAudit when some input was not a page address. Read defensively:
+  // arriving here by a bookmark or a reload has no navigation state at all.
+  const navState = useLocation().state as { skipped?: unknown } | null
+  const skipped = Array.isArray(navState?.skipped)
+    ? (navState.skipped as unknown[]).filter((line): line is string => typeof line === 'string')
+    : []
 
   const [page, setPage] = useState(1)
   const [urlStatus, setUrlStatus] = useState<string>('')
@@ -65,6 +72,8 @@ export default function AuditJob(): JSX.Element {
           </button>
         ) : null}
       </PageHeader>
+
+      {skipped.length > 0 ? <SkippedNotice lines={skipped} /> : null}
 
       {/* ── Progress ─────────────────────────────────────────────────────── */}
       <section className="rounded-lg border border-ink-200 bg-white p-4">
@@ -293,4 +302,35 @@ function describeStatus(status: string): string {
     default:
       return ''
   }
+}
+
+/**
+ * What was left out of the audit, and why.
+ *
+ * Filenames pasted from a DAM export used to be turned into hostnames and
+ * queued — `kristen_moris.jpg` became `https://kristen_moris.jpg/` and failed
+ * with a DNS error that explained nothing. They are now rejected up front,
+ * which fixes the failure but creates a worse risk: input disappearing with no
+ * trace. Naming the lines back is what keeps the fix honest.
+ */
+function SkippedNotice({ lines }: { lines: string[] }): JSX.Element {
+  return (
+    <section className="mb-6 rounded-lg border border-caution-200 bg-caution-50 px-4 py-3">
+      <h2 className="text-sm font-semibold text-caution-900">
+        {lines.length} line{lines.length === 1 ? '' : 's'} could not be read as a web address
+      </h2>
+      <p className="mt-1 text-sm leading-relaxed text-caution-800">
+        They were left out of this audit. A filename or a DAM path is not a page
+        address — to find where an asset is used, audit the pages it appears on and
+        then look it up, or use reverse lookup directly.
+      </p>
+      <ul className="mt-2 space-y-1">
+        {lines.map((line) => (
+          <li key={line} className="truncate font-mono text-xs text-caution-800" title={line}>
+            {line}
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
 }

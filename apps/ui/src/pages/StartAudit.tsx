@@ -4,6 +4,7 @@ import { PageHeader } from '../components/Layout'
 import { ErrorState, PhaseNotice } from '../components/States'
 import { useCreateAudit } from '../api/queries'
 import { useAuditStore } from '../store/auditStore'
+import { normalizeUrl } from '@capella/types'
 
 type InputMode = 'paste' | 'csv' | 'sitemap'
 
@@ -26,10 +27,15 @@ export default function StartAudit(): JSX.Element {
   const [file, setFile] = useState<File | null>(null)
   const [isDragging, setIsDragging] = useState(false)
 
-  const urlCount = urls
+  // Counted with the same rule the API queues by, so the preview cannot promise
+  // more than the audit delivers. Counting non-blank lines said "6 URLs
+  // detected" for five filenames and one real address.
+  const parsedUrls = urls
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith('#')).length
+    .filter((line) => line.length > 0 && !line.startsWith('#'))
+  const urlCount = parsedUrls.filter((line) => normalizeUrl(line) !== null).length
+  const unreadableCount = parsedUrls.length - urlCount
 
   const canSubmit =
     !createAudit.isPending &&
@@ -55,7 +61,9 @@ export default function StartAudit(): JSX.Element {
       startedAt: new Date().toISOString(),
     })
 
-    navigate(`/audit/${result.jobId}`)
+    // Carried in navigation state rather than shown here: submitting leaves
+    // this page immediately, so a notice rendered here would never be read.
+    navigate(`/audit/${result.jobId}`, { state: { skipped: result.skipped } })
   }
 
   function handleDrop(event: DragEvent<HTMLLabelElement>): void {
@@ -133,6 +141,12 @@ export default function StartAudit(): JSX.Element {
                   {urlCount} URL{urlCount === 1 ? '' : 's'} detected. Blank lines and lines starting
                   with # are ignored.
                 </p>
+                {unreadableCount > 0 ? (
+                  <p className="mt-1 text-xs text-caution-700">
+                    {unreadableCount} line{unreadableCount === 1 ? '' : 's'} will be skipped — not a
+                    web address. A filename or DAM path is not a page URL.
+                  </p>
+                ) : null}
               </div>
             ) : null}
 
