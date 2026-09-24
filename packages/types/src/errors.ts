@@ -45,6 +45,14 @@ export const ERROR_CODES = {
   // Generic
   RATE_LIMITED: 'RATE_LIMITED',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
+
+  /**
+   * Raised by the UI, never by the API — the API cannot report that it is
+   * absent. Set when a response is plainly not this API: HTML from a static
+   * host's SPA fallback, or a 405 because that host only allows GET and HEAD.
+   * Both mean the interface is deployed and the backend is not.
+   */
+  API_NOT_REACHABLE: 'API_NOT_REACHABLE',
 } as const
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES]
@@ -86,6 +94,8 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
 
   RATE_LIMITED: 429,
   INTERNAL_ERROR: 500,
+  // Client-side only; the status is whatever the static host gave us.
+  API_NOT_REACHABLE: 503,
 }
 
 /**

@@ -18,7 +18,7 @@ import type { ApiErrorBody, PaginationMeta } from '@capella/types'
  * Trailing slashes are stripped because `https://host/` + `/api/v1` is a double
  * slash, which some proxies treat as a different path and will 404 on.
  */
-const API_ORIGIN = (import.meta.env.VITE_API_ORIGIN ?? '').replace(/\/+$/, '')
+const API_ORIGIN = (import.meta.env?.VITE_API_ORIGIN ?? '').replace(/\/+$/, '')
 
 /** Absolute URL for an API path. Needed wherever the browser, not `fetch`,
  * does the request: `<a href>` downloads, `<video src>`, form posts. Those
@@ -46,6 +46,11 @@ export class ApiError extends Error {
   get isNotConfigured(): boolean {
     return this.status === 501
   }
+
+  /** No API at this address — a deployment problem, not a request problem. */
+  get isApiUnreachable(): boolean {
+    return this.code === 'API_NOT_REACHABLE'
+  }
 }
 
 interface Envelope<T> {
@@ -53,6 +58,32 @@ interface Envelope<T> {
   error?: ApiErrorBody
   meta?: PaginationMeta
 }
+
+/**
+ * The API is not there at all — as opposed to there and unhappy.
+ *
+ * Two symptoms, one cause. When the UI is deployed to a static host with no
+ * `VITE_API_ORIGIN`, its requests go to its own origin, where nothing serves
+ * `/api`. The host then answers a GET with the SPA's own `index.html` and a
+ * cheerful 200, and rejects a POST with 405 because static hosting allows only
+ * GET and HEAD.
+ *
+ * Reported raw, those read as "Server returned a non-JSON response (HTTP 200)"
+ * and "HTTP 405" — two unrelated-looking bugs that are really one missing
+ * deployment. Naming it is the difference between a five-minute fix and an
+ * afternoon.
+ */
+function looksLikeMissingApi(response: Response, body: string): boolean {
+  if (response.status === 405) return true
+
+  const contentType = response.headers.get('content-type') ?? ''
+  return contentType.includes('text/html') || body.trimStart().startsWith('<!doctype')
+}
+
+const MISSING_API_MESSAGE =
+  'The API is not reachable at this address. The interface is deployed but the ' +
+  'backend is not — a static host cannot run the audit worker. Point VITE_API_ORIGIN ' +
+  'at the deployed API and rebuild. See docs/deployment.md.'
 
 async function parse<T>(response: Response): Promise<Envelope<T>> {
   const text = await response.text()
@@ -63,8 +94,10 @@ async function parse<T>(response: Response): Promise<Envelope<T>> {
   } catch {
     return {
       error: {
-        code: 'INTERNAL_ERROR',
-        message: `Server returned a non-JSON response (HTTP ${response.status})`,
+        code: looksLikeMissingApi(response, text) ? 'API_NOT_REACHABLE' : 'INTERNAL_ERROR',
+        message: looksLikeMissingApi(response, text)
+          ? MISSING_API_MESSAGE
+          : `Server returned a non-JSON response (HTTP ${response.status})`,
       } as ApiErrorBody,
     }
   }
@@ -86,7 +119,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<{ data: T; 
   if (!response.ok || envelope.error) {
     throw new ApiError(
       response.status,
-      envelope.error ?? { code: 'INTERNAL_ERROR', message: `HTTP ${response.status}` },
+      envelope.error ??
+        (response.status === 405
+          ? ({ code: 'API_NOT_REACHABLE', message: MISSING_API_MESSAGE } as ApiErrorBody)
+          : { code: 'INTERNAL_ERROR', message: `HTTP ${response.status}` }),
     )
   }
 

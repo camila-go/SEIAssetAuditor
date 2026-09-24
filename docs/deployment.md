@@ -112,6 +112,28 @@ UI. If they disagree, every request fails CORS preflight and the UI shows
 generic network errors with nothing useful in its console. This is the single
 most likely thing to get wrong.
 
+## "HTTP 405" when starting an audit
+
+The interface is deployed; the backend is not. Nothing else causes it.
+
+A static host serves the UI and has no `/api`, so with `VITE_API_ORIGIN` unset
+the UI calls its own origin and the host answers:
+
+| Request | What a static host does | How it used to read |
+|---|---|---|
+| `GET /api/v1/assets/stats` | returns the SPA's `index.html` with **200** | "Server returned a non-JSON response (HTTP 200)" |
+| `POST /api/v1/audit` | **405**, because static hosting allows only GET and HEAD | "HTTP 405" |
+
+Two unrelated-looking errors, one missing deployment. The UI now recognises both
+and says so (`API_NOT_REACHABLE`), but the fix is the same: **deploy the backend
+and point the UI at it.** A static host cannot run this tool — the worker is a
+daemon that drives a headless Chromium, and no amount of Vercel configuration
+changes that.
+
+Note that Vercel only applies this repo's `vercel.json` when the Root Directory
+is the repository root. With it set elsewhere the rewrites are ignored entirely,
+which is why `/api/*` returns the app shell on the current deployment.
+
 ## Verifying
 
 ```bash
