@@ -71,6 +71,28 @@ Set one environment variable:
 
 It is read at **build time**, not runtime, so changing it needs a redeploy.
 
+#### Why the install is scoped
+
+`installCommand` is `npm ci --workspace=@capella/ui --include-workspace-root`
+rather than a plain install. Unscoped, Vercel installs every workspace —
+including `onnxruntime-node` and `sharp` from the embedding package, and
+Playwright — to build a static frontend that needs none of them. Measured on a
+clean clone of this repo:
+
+| | Unscoped | Scoped |
+|---|---|---|
+| `node_modules` | 833 MB | **259 MB** |
+| packages | 518 | **340** |
+| build output | 42 files | 42 files, byte-identical |
+
+`npm ci` rather than `npm install` so the lockfile is authoritative: a drifted
+lockfile fails the build loudly instead of quietly resolving something the
+lockfile never described.
+
+Note that `vercel.json` carries no comments — Vercel validates it against a
+schema, and an unknown key is one more way for this file to fail. The reasoning
+lives here instead.
+
 ### 3. Make the two agree
 
 `VITE_API_ORIGIN` (Vercel) points at the API. `UI_ORIGIN` (Render) allows the
