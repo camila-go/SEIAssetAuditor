@@ -334,7 +334,9 @@ both of which were previously invisible:
   asked for and never had.
 - **Those images can never be fingerprinted over HTTP**, so reverse image search
   and duplicate detection cannot cover them in Phase 1. This is the real reason
-  pHash coverage sits at 56 of 58 rather than a bug in the sweep.
+  pHash coverage stops short of every image rather than a bug in the sweep. It
+  was 56 of 58 when this was found and is 62 of 64 now — the shortfall is always
+  exactly the images the dispatcher will not serve.
 
 **Open question for IT:** is `/content/dam/vc/` meant to be publicly
 unreachable? If it is deliberate, full reverse-image coverage needs the AEM read

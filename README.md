@@ -26,6 +26,9 @@ Built to PRD v1.5. See [`PRD.md`](./PRD.md) and the conventions in
   it matches resized, recompressed and reformatted copies — not just identical
   files.
 - Duplicate detection across indexed images, including renamed copies.
+- **The index keeps itself current.** A completed audit queues the perceptual-hash
+  and embedding sweeps itself, so newly-found assets become searchable by image
+  and by meaning without anyone remembering to run anything.
 - Asset search and browse, with a direct link to the AEM path.
 - Testimonial scraping (both AEM components and hardcoded text), search across
   quote / student / program, and a per-testimonial page map.
@@ -135,7 +138,7 @@ npm run test          # Jest unit + integration
 npm run test:e2e      # Playwright E2E (needs `npm run dev` running)
 npm run lint          # ESLint + tsc
 npm run db:studio     # Prisma Studio
-npm run crawl         # Enqueue a pHash sweep by hand
+npm run crawl         # Force a pHash sweep — normally automatic after an audit
 ```
 
 ---
@@ -167,6 +170,19 @@ after each batch. A crash mid-job resumes from whatever is still `pending`; a
 replayed batch recomputes counters from the rows rather than incrementing them,
 so nothing is double-counted. One failed URL is recorded and skipped — it can
 never abort a batch or a job.
+
+### Why the index does not go stale
+
+An audit discovers assets; it does not fingerprint or embed them. Those are
+separate sweeps, and they used to need a human to remember. A completed audit
+now queues both itself.
+
+Still queued, never inline: fingerprinting re-downloads every image, which has
+no business holding up an audit or sharing its retry semantics. Both sweeps
+coalesce on a fixed job id, so several audits finishing together produce one
+sweep rather than several racing for the same rows. A failure to enqueue is
+logged and swallowed — the audit has already succeeded, and throwing would fail
+a finished job and make BullMQ retry the whole thing.
 
 ### The AEM write boundary
 
@@ -243,10 +259,13 @@ Run locally against real PostgreSQL 17, Redis 8, and the live capella.edu site.
 - `jest`: **218 tests, 13 suites, all passing**.
 - Prisma migration applied to a real PostgreSQL database; seed script runs.
 - API, worker and UI all boot; `/health` reports the phase flags.
-- **A real audit ran end to end**: 3 URLs enqueued → BullMQ → worker →
-  Playwright → 51 DAM assets across 8 brand folders and 4 testimonials
-  extracted and persisted →
-  results polled live through the API.
+- **Real audits ran end to end**: URLs enqueued → BullMQ → worker → Playwright →
+  assets and testimonials extracted and persisted → results polled live through
+  the API. The index now holds **72 assets across 10 audited pages** and 4
+  testimonials, all from live capella.edu.
+- **The follow-up sweeps ran without being asked.** After an audit of two fresh
+  pages, pHash coverage went 56/58 → 62/64 and embeddings 65/65 → 72/72 with no
+  manual step.
 - One deliberately broken URL was correctly recorded as not-published with zero
   assets, and did not affect the other two — the "one bad URL never stops the
   job" rule holds in practice, not just in theory.

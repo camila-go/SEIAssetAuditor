@@ -120,7 +120,7 @@ const JOBS: readonly Job[] = [
     to: '/audit',
     body: 'Paste URLs, upload a CSV, or point it at a sitemap. It reads each page and records the DAM assets, the testimonials, and whether the page looks published.',
     detail:
-      'It runs in the background — close the tab and come back. One page that fails is recorded with the reason and skipped; it never stops the rest.',
+      'It runs in the background — close the tab and come back. One page that fails is recorded with the reason and skipped; it never stops the rest. When it finishes, anything new is fingerprinted and indexed for search automatically.',
   },
   {
     title: 'Find where an asset is used',

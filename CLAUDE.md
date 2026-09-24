@@ -26,7 +26,7 @@ npm run lint         # ESLint + TypeScript check
 npm run db:migrate   # Run Prisma migrations
 npm run db:seed      # Seed with sample Capella asset paths
 npm run db:studio    # Open Prisma Studio
-npm run crawl        # Trigger manual DAM crawl job
+npm run crawl        # Force a pHash sweep — a completed audit queues one itself
 ```
 
 ## Project Structure

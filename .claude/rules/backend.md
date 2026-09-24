@@ -39,8 +39,10 @@ apps/api/src/
 apps/worker/src/
 ├── index.ts               # Worker entry — connects to BullMQ, registers processors
 ├── processors/
-│   ├── auditProcessor.ts  # Processes AuditJob batches, writes results to DB
-│   └── pHashProcessor.ts  # Background pHash computation
+│   ├── auditProcessor.ts       # Processes AuditJob batches, writes results to DB
+│   ├── pHashProcessor.ts       # Background pHash computation
+│   ├── embeddingProcessor.ts   # Background embedding sweep for semantic search
+│   └── transcriptionProcessor.ts  # ffmpeg + Whisper, gated on TRANSCRIPTION_ENABLED
 └── config.ts
 
 packages/queue/src/
@@ -266,6 +268,19 @@ blockquote + [class*="name"]          → source_type: hardcoded_text
 - Store as `phash` string on the Asset model
 - Hamming distance ≤ 10 = duplicate candidate
 - Run as background job via BullMQ — never inline during scraping
+- **A completed audit enqueues the sweep itself** (`scheduleIndexing` in
+  `auditProcessor.ts`), along with the embedding sweep. Before that, both needed
+  someone to remember `npm run crawl`, and the index silently fell behind every
+  audit. Enqueue failures are logged and swallowed: the audit has already
+  succeeded, so throwing would fail a finished job and force a full retry.
+- Both sweeps coalesce on a fixed job id, so audits finishing together produce
+  one sweep rather than several racing for the same rows. A fixed id requires
+  `removeOnComplete: true` — BullMQ rejects a duplicate id against a *completed*
+  job too, which otherwise makes the id permanently taken and silently no-ops
+  every later sweep.
+- `findNeedingPhash` must match `countHashedImages`: a row needs work only when
+  **both** hashes are null. Selecting on `phash` alone re-selects every
+  white-on-transparent logo forever, because those keep `phash = null` by design.
 - Expose via `GET /api/v1/duplicates?threshold=10`
 
 ## Database
