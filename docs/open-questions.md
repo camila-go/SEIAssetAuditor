@@ -420,3 +420,61 @@ has been input that carried no signal being confidently turned into an answer �
 a degenerate pHash matching every white logo, a semantic threshold matching
 every Capella asset, and now a filename becoming a hostname. The shape to watch
 for is a permissive rule with a comment claiming it is strict.
+
+
+## Fingerprinting stalled at 416 of 665 — two causes (found 2026-09-24)
+
+A completed audit had been queueing the pHash sweep since 2026-09-21, and
+coverage still sat at 416 of 665 with the UI correctly reporting that the rest
+could not be matched.
+
+**Cause one: the sweep did one batch and stopped.** `SWEEP_LIMIT` was 200 with
+no loop, unlike the embedding sweep which runs until nothing remains. One audit
+queues one sweep, so an index of 665 images could never be covered however many
+audits ran. The sweep now continues itself while a batch comes back full, with
+the limit *lowered* to 100 — see cause two.
+
+**Cause two, and the reason it never recovered: a failed job poisoned the
+queue.** Redis held `bull:phash:phash-sweep` with
+`failedReason: "job stalled more than allowable limit"`. BullMQ rejects a
+duplicate job id against a **failed** job exactly as it does against a completed
+one, and `removeOnFail` was set to a 7-day retention — so every `enqueuePhash`
+for a week was silently dropped.
+
+That is the same trap already documented for the embedding queue, reintroduced
+on the failure side when coalescing was added to the pHash queue three days
+earlier. `removeOnFail` is now `true`: a blocked queue is far worse than a lost
+failure record, and the failure is in the worker log either way.
+
+The stall itself is why the batch got smaller, not bigger — 200 downloads plus
+native image decoding is long enough for BullMQ to give up on the job.
+
+Verified by clearing every hash and re-running: 0 → 653 of 665 across 8 chained
+sweeps, terminating when the last batch came back short. The remaining 12 are
+the images the dispatcher will not serve.
+
+## Assets are now re-checked on a schedule (added 2026-09-24)
+
+An audit records what a page referenced at the moment it was read. Nothing after
+that told the tool an asset had been deleted, renamed or unpublished — so
+"appears on 3 pages" kept being reported with full confidence for as long as
+nobody happened to re-audit those pages.
+
+Every asset is now re-checked against the live site **every three days** (a
+BullMQ repeatable job, `REVALIDATION_CRON`), and the assets page states when the
+last check ran and what it found.
+
+First full run over 779 assets: **769 still served, 10 not**. Those ten are real
+findings — entries in the index that capella.edu no longer serves.
+
+Two distinctions the implementation keeps deliberately:
+
+- A request that never completed (DNS, timeout) records status `0`, not a 4xx.
+  "We could not tell" is not the same claim as "the server said it is gone", and
+  collapsing them would turn a flaky network into a report of mass deletion.
+- The UI says plainly that part of the DAM is not publicly readable, so some of
+  the ten may exist and simply be unreachable without an AEM account.
+
+`removeOnFail: true` here too, for the same reason as the pHash queue — a
+retained failed id would permanently block a schedule whose entire purpose is to
+run unattended.

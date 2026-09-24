@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --build && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:ui": "node ../../scripts/build-ui.mjs",
+    "install:ui": "node ../../scripts/install-ui.mjs"
   },
   "dependencies": {
     "@capella/types": "*",

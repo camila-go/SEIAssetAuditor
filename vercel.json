@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build:ui",
   "outputDirectory": "apps/ui/dist",
-  "installCommand": "npm ci --workspace=@capella/ui --include-workspace-root",
+  "installCommand": "npm run install:ui",
   "framework": null,
   "rewrites": [
     {

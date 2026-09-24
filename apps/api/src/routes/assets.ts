@@ -1,7 +1,8 @@
 import { Router, type Request } from 'express'
 import busboy from 'busboy'
 import { ASSET_TYPES, AppError, ERROR_CODES } from '@capella/types'
-import { enqueuePhash } from '@capella/queue'
+import { enqueuePhash, enqueueRevalidation } from '@capella/queue'
+import { assetRepo } from '@capella/db'
 import { asyncRoute } from '../middleware/errorHandler.js'
 import { accepted, notConfigured, ok, parseEnum, parsePagination, requireString } from '../lib/respond.js'
 import * as assetService from '../services/assetService.js'
@@ -63,6 +64,38 @@ assetsRouter.post(
   asyncRoute(async (_req, res) => {
     await enqueuePhash(config.redisUrl, {})
     accepted(res, { queued: true, coverage: await imageSearchService.getCoverage() })
+  }),
+)
+
+/**
+ * GET /api/v1/assets/verification
+ *
+ * How recently the index was confirmed against the live site. Surfaced for the
+ * same reason pHash coverage is: a page map from a months-old crawl looks
+ * identical to one from this morning unless the tool says which it is.
+ */
+assetsRouter.get(
+  '/verification',
+  asyncRoute(async (_req, res) => {
+    ok(res, { ...(await assetRepo.getVerificationSummary()), everyDays: 3 })
+  }),
+)
+
+/** POST /api/v1/assets/verification — re-check now, outside the schedule. */
+assetsRouter.post(
+  '/verification',
+  asyncRoute(async (req, res) => {
+    const force = (req.query as Record<string, unknown>)['force'] === 'true'
+    await enqueueRevalidation(config.redisUrl, force ? { force } : {})
+    ok(res, { queued: true, ...(await assetRepo.getVerificationSummary()) })
+  }),
+)
+
+/** GET /api/v1/assets/missing — assets the site no longer serves. */
+assetsRouter.get(
+  '/missing',
+  asyncRoute(async (_req, res) => {
+    ok(res, await assetRepo.findMissing())
   }),
 )
 

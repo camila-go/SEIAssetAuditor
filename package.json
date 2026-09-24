@@ -21,7 +21,8 @@
     "prebuild": "npm run db:generate",
     "build": "tsc --build && npm run build --workspace=@capella/ui",
     "// build:ui": "Vercel builds only this. The UI's single workspace dependency is @capella/types, so this deliberately avoids `tsc --build` at the root \u2014 that would drag in packages/db (needs `prisma generate`) and packages/scraper (needs Playwright), neither of which a static frontend host should have to install.",
-    "build:ui": "tsc --build packages/types && npm run build --workspace=@capella/ui",
+    "build:ui": "node scripts/build-ui.mjs",
+    "build:ui:workspace": "tsc --build packages/types && npm run build --workspace=@capella/ui",
     "//test": "Every package is ESM, so ts-jest needs Node's ESM VM modules. Without the flag it silently downlevels to CommonJS and any file using import.meta fails to compile \u2014 three suites disappeared exactly that way.",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "test:e2e": "playwright test --config=apps/ui/playwright.config.ts",
@@ -33,7 +34,8 @@
     "db:seed": "tsx packages/db/prisma/seed.ts",
     "db:studio": "prisma studio --schema=packages/db/prisma/schema.prisma",
     "crawl": "tsx apps/worker/src/scripts/manualCrawl.ts",
-    "embed:prewarm": "npm run build --workspace=@capella/embedding && node packages/embedding/prewarm.mjs"
+    "embed:prewarm": "npm run build --workspace=@capella/embedding && node packages/embedding/prewarm.mjs",
+    "install:ui": "node scripts/install-ui.mjs"
   },
   "//dependencies": "The prisma CLI is a RUNTIME dependency of the deployed image, not just a build tool: render.yaml runs `prisma migrate deploy` as a pre-deploy step inside the built container, where the runtime stage installs with --omit=dev. As a devDependency it was absent there, so npx would have tried to fetch it from the network mid-deploy \u2014 failing on a restricted host, or silently pulling a version that does not match the lockfile.",
   "dependencies": {

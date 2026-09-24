@@ -4,6 +4,7 @@ export const QUEUE_NAMES = {
   phash: 'phash',
   transcription: 'transcription',
   embedding: 'embedding',
+  revalidation: 'revalidation',
 } as const
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES]
@@ -14,6 +15,7 @@ export const JOB_NAMES = {
   computePhash: 'compute-phash',
   transcribe: 'transcribe',
   buildEmbeddings: 'build-embeddings',
+  revalidateAssets: 'revalidate-assets',
 } as const
 
 // ─── Payloads ────────────────────────────────────────────────────────────────
@@ -45,4 +47,16 @@ export type JobPayloadMap = {
   [QUEUE_NAMES.phash]: PhashJobPayload
   [QUEUE_NAMES.transcription]: TranscriptionJobPayload
   [QUEUE_NAMES.embedding]: EmbeddingJobPayload
+}
+
+/**
+ * Re-check that indexed assets are still served.
+ *
+ * Empty payload: the worker reads which rows are due from the DB rather than
+ * carrying a list, so a schedule set up weeks ago cannot be operating on a
+ * stale idea of what exists.
+ */
+export interface RevalidationJobPayload {
+  /** Re-check everything, not just rows past the staleness window. */
+  force?: boolean
 }

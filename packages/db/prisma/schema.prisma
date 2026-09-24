@@ -103,6 +103,15 @@ model Asset {
   phashAlt   String?   @map("phash_alt")
   isIndexed  Boolean   @default(false) @map("is_indexed")
 
+  /// Link-rot tracking, refreshed on a schedule rather than only when a page
+  /// happens to be re-audited. An asset can vanish from the DAM long after the
+  /// last audit that found it, and until this existed the tool would keep
+  /// reporting it as live for as long as nobody re-ran the audit.
+  lastVerifiedAt     DateTime? @map("last_verified_at")
+  /// HTTP status from the last check. Null means never checked. 0 means the
+  /// request itself failed (DNS, timeout) rather than returning a status.
+  lastVerifiedStatus Int?      @map("last_verified_status")
+
   /// Sentence embedding for semantic search. Stored as a plain float array
   /// rather than a pgvector column because this Postgres has no `vector`
   /// extension available; similarity is computed in the application. See
@@ -124,6 +133,7 @@ model Asset {
   @@index([phash])
   @@index([filename])
   @@index([assetType, deletedAt])
+  @@index([lastVerifiedAt])
   @@map("assets")
 }
 

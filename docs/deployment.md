@@ -65,6 +65,18 @@ the rest: it runs `npm run build:ui` and serves `apps/ui/dist`.
 > root and leave Build Command and Output Directory blank so `vercel.json`
 > supplies them.
 
+#### The repo now survives the wrong Root Directory
+
+`vercel.json` runs `npm run install:ui` and `npm run build:ui`, and both exist in
+the root, `apps/api` and `apps/ui` manifests. They delegate to
+`scripts/install-ui.mjs` / `scripts/build-ui.mjs`, which walk up to the real
+workspace root, work there, and — only when started somewhere else — mirror the
+build output back so `outputDirectory` resolves either way.
+
+This is a safety net, not the fix. **Set the Root Directory correctly.** The
+scripts print a warning pointing here when they have to compensate, and the
+mirror directory is gitignored. Once the setting is right they are no-ops.
+
 Set one environment variable:
 
 - `VITE_API_ORIGIN` — the Render API URL, e.g. `https://sei-site-auditor-api.onrender.com`

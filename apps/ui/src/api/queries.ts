@@ -517,3 +517,32 @@ export function useApprovalDecision(submissionId: string) {
     },
   })
 }
+
+// ─── Asset verification (link rot) ───────────────────────────────────────────
+
+export interface VerificationSummary {
+  total: number
+  checked: number
+  live: number
+  missing: number
+  oldestCheck: string | null
+  newestCheck: string | null
+  everyDays: number
+}
+
+export function useAssetVerification(): UseQueryResult<VerificationSummary> {
+  return useQuery({
+    queryKey: ['assets', 'verification'],
+    queryFn: async () => (await api.get<VerificationSummary>('/assets/verification')).data,
+    retry: false,
+  })
+}
+
+export function useRevalidateAssets() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async () =>
+      (await api.post<{ queued: boolean }>('/assets/verification')).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['assets', 'verification'] }),
+  })
+}

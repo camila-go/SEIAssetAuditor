@@ -3,6 +3,9 @@ import { execa } from 'execa'
 import { disconnect } from '@capella/db'
 import {
   QUEUE_NAMES,
+  REVALIDATION_CRON,
+  scheduleRevalidation,
+  type RevalidationJobPayload,
   closeConnection,
   getConnection,
   type AuditJobPayload,
@@ -17,6 +20,7 @@ import { processAuditJob } from './processors/auditProcessor.js'
 import { processPhashJob } from './processors/phashProcessor.js'
 import { processTranscriptionJob } from './processors/transcriptionProcessor.js'
 import { processEmbeddingJob } from './processors/embeddingProcessor.js'
+import { processRevalidationJob } from './processors/revalidationProcessor.js'
 
 /**
  * Worker entry point. Runs as its own process (`npm run dev:worker`) —
@@ -77,13 +81,29 @@ async function main(): Promise<void> {
    * parallelise. lockDuration is generous because a cold model load plus a
    * large corpus can run for minutes.
    */
+  const revalidationWorker = new Worker<RevalidationJobPayload>(
+    QUEUE_NAMES.revalidation,
+    processRevalidationJob,
+    { connection: getConnection(config.redisUrl), concurrency: 1 },
+  )
+
   const embeddingWorker = new Worker<EmbeddingJobPayload>(
     QUEUE_NAMES.embedding,
     processEmbeddingJob,
     { connection, concurrency: 1, lockDuration: 10 * 60_000 },
   )
 
-  const workers = [auditWorker, phashWorker, transcriptionWorker, embeddingWorker]
+  const workers = [auditWorker, phashWorker, transcriptionWorker, embeddingWorker, revalidationWorker]
+
+  // Idempotent: BullMQ keys a repeatable job by name and pattern, so restarting
+  // the worker does not stack schedules. Failing to install it must not stop the
+  // worker — audits matter more than the maintenance sweep.
+  try {
+    await scheduleRevalidation(config.redisUrl)
+    logger.info({ cron: REVALIDATION_CRON }, 'Asset revalidation scheduled')
+  } catch (error) {
+    logger.error({ err: error }, 'Could not schedule asset revalidation — link rot will go unnoticed')
+  }
 
   for (const worker of workers) {
     worker.on('failed', (job, error) => {

@@ -4,6 +4,9 @@ dist/
 # generated files were committed in the initial import and re-churned on every
 # build.
 dist-types/
+# Mirror written by scripts/build-ui.mjs when a host starts the build inside a
+# workspace instead of at the repo root.
+apps/*/apps/
 build/
 *.tsbuildinfo
 

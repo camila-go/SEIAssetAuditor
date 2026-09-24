@@ -286,3 +286,96 @@ export async function setEmbedding(
     data: { embedding, embeddingModel: model, embeddedAt },
   })
 }
+
+// ─── Link-rot verification ───────────────────────────────────────────────────
+
+/**
+ * Assets due a liveness re-check, oldest first.
+ *
+ * Never-checked rows sort first because `lastVerifiedAt` is null, which is what
+ * we want: a freshly indexed asset has never been confirmed to still exist.
+ */
+export async function findNeedingVerification(
+  staleBefore: Date,
+  limit: number,
+  force = false,
+): Promise<Array<{ id: string; aemPath: string }>> {
+  return prisma.asset.findMany({
+    where: {
+      deletedAt: null,
+      ...(force ? {} : { OR: [{ lastVerifiedAt: null }, { lastVerifiedAt: { lt: staleBefore } }] }),
+    },
+    select: { id: true, aemPath: true },
+    orderBy: [{ lastVerifiedAt: { sort: 'asc', nulls: 'first' } }, { createdAt: 'asc' }],
+    take: limit,
+  })
+}
+
+/** `status` is 0 when the request never completed — DNS, timeout, reset. */
+export async function recordVerification(
+  id: string,
+  status: number,
+  checkedAt: Date,
+): Promise<void> {
+  await prisma.asset.update({
+    where: { id },
+    data: { lastVerifiedAt: checkedAt, lastVerifiedStatus: status },
+  })
+}
+
+export interface VerificationSummary {
+  total: number
+  checked: number
+  live: number
+  /** Checked and NOT served — the link rot this exists to find. */
+  missing: number
+  /** Oldest check still on record, so the UI can say how current this is. */
+  oldestCheck: Date | null
+  newestCheck: Date | null
+}
+
+/**
+ * How trustworthy the "appears on" answers currently are.
+ *
+ * Surfaced rather than kept internal for the same reason pHash coverage is: a
+ * page map built from a months-old crawl looks identical to one built this
+ * morning unless the tool says otherwise.
+ */
+export async function getVerificationSummary(): Promise<VerificationSummary> {
+  const base = { deletedAt: null } as const
+
+  const [total, checked, live, missing, oldest, newest] = await Promise.all([
+    prisma.asset.count({ where: base }),
+    prisma.asset.count({ where: { ...base, lastVerifiedAt: { not: null } } }),
+    prisma.asset.count({ where: { ...base, lastVerifiedStatus: { gte: 200, lt: 400 } } }),
+    prisma.asset.count({ where: { ...base, lastVerifiedStatus: { gte: 400 } } }),
+    prisma.asset.findFirst({
+      where: { ...base, lastVerifiedAt: { not: null } },
+      orderBy: { lastVerifiedAt: 'asc' },
+      select: { lastVerifiedAt: true },
+    }),
+    prisma.asset.findFirst({
+      where: { ...base, lastVerifiedAt: { not: null } },
+      orderBy: { lastVerifiedAt: 'desc' },
+      select: { lastVerifiedAt: true },
+    }),
+  ])
+
+  return {
+    total,
+    checked,
+    live,
+    missing,
+    oldestCheck: oldest?.lastVerifiedAt ?? null,
+    newestCheck: newest?.lastVerifiedAt ?? null,
+  }
+}
+
+/** Assets confirmed gone, for the maintenance view. */
+export async function findMissing(limit = 200): Promise<Asset[]> {
+  return prisma.asset.findMany({
+    where: { deletedAt: null, lastVerifiedStatus: { gte: 400 } },
+    orderBy: { lastVerifiedAt: 'desc' },
+    take: limit,
+  })
+}

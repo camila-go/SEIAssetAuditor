@@ -7,6 +7,7 @@ import { useAsset, useAssets } from '../api/queries'
 import { formatBytes } from '../lib/format'
 import { MatchReasonBadge, SemanticNotice } from '../components/MatchReason'
 import { AssetPreview } from '../components/AssetPreview'
+import { IndexTransparency } from '../components/IndexTransparency'
 
 /** `/assets` — search and browse everything indexed. */
 export default function Assets(): JSX.Element {
@@ -29,6 +30,8 @@ export default function Assets(): JSX.Element {
         title="Assets"
         description="Every DAM asset discovered by an audit. Search by filename or path."
       />
+
+      <IndexTransparency />
 
       {/* Stacks below sm — see the note in Testimonials.tsx. */}
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
