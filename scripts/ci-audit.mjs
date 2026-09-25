@@ -109,3 +109,45 @@ if (status.failedUrls > 0) {
 }
 
 console.log(`\n[ci-audit] done — ${status.completedUrls} scraped, ${status.failedUrls} failed`)
+
+/**
+ * Write a summary to the Actions run page.
+ *
+ * Without this the only record of what an audit found is buried in a step's
+ * stdout, which nobody scrolls to. The run page is where someone looks to
+ * answer "did it work and what did it find", so it should answer that.
+ */
+const summaryFile = process.env.GITHUB_STEP_SUMMARY
+if (summaryFile) {
+  const { writeFileSync } = await import('node:fs')
+  const results = (await json(`/api/v1/audit/${jobId}/results?limit=200`)).data
+
+  const rows = results
+    .map(
+      (r) =>
+        `| ${r.url.replace('https://www.capella.edu', '')} | ${r.assetCount ?? 0} | ` +
+        `${r.testimonialCount ?? 0} | ${r.liveStatus} |`,
+    )
+    .join('\n')
+
+  const failureRows =
+    status.failedUrls > 0
+      ? '\n\n### Could not be scraped\n\n' +
+        (await json(`/api/v1/audit/${jobId}/failures`)).data
+          .map((f) => `- \`${f.url}\`\n  ${String(f.error).slice(0, 200)}`)
+          .join('\n')
+      : ''
+
+  writeFileSync(
+    summaryFile,
+    `## ${name}\n\n` +
+      `**${status.completedUrls} scraped · ${status.failedUrls} failed**` +
+      (skipped.length > 0 ? ` · ${skipped.length} skipped (not web addresses)` : '') +
+      `\n\n| Page | Assets | Testimonials | Status |\n|---|--:|--:|---|\n${rows}\n` +
+      failureRows +
+      `\n\n<sub>The refreshed index is committed to this repository; the published ` +
+      `snapshot rebuilds from it.</sub>\n`,
+    { flag: 'a' },
+  )
+  console.log('[ci-audit] wrote the run summary')
+}
