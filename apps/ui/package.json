@@ -8,7 +8,8 @@
     "build": "tsc --build && vite build",
     "preview": "vite preview",
     "build:ui": "node ../../scripts/build-ui.mjs",
-    "install:ui": "node ../../scripts/install-ui.mjs"
+    "install:ui": "node ../../scripts/install-ui.mjs",
+    "build:static": "BUILD_STATIC=1 node ../../scripts/build-ui.mjs"
   },
   "dependencies": {
     "@capella/types": "*",

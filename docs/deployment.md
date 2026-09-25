@@ -86,6 +86,14 @@ cannot end up in that state whatever the dashboard says.
 
 To go live: set `VITE_API_ORIGIN` and redeploy. Nothing else changes.
 
+`install:ui`, `build:ui` and `build:static` all exist in the root, `apps/api`
+and `apps/ui` manifests, and all delegate to the same two scripts. Which command
+Vercel actually runs is not visible from the repo — `vercel.json` says one
+thing, a dashboard override says another, and the Root Directory decides whether
+the file is read at all. Rather than guess, every combination resolves to the
+same correct build. Confirmed across all six: three roots by the commands each
+might be given.
+
 > **The Root Directory must be the repository root.** This has now broken the
 > build twice, with two different-looking errors and one cause:
 >

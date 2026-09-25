@@ -20,7 +20,8 @@
     "build": "tsc --build",
     "start": "node dist/index.js",
     "build:ui": "node ../../scripts/build-ui.mjs",
-    "install:ui": "node ../../scripts/install-ui.mjs"
+    "install:ui": "node ../../scripts/install-ui.mjs",
+    "build:static": "BUILD_STATIC=1 node ../../scripts/build-ui.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.126.0",

@@ -78,7 +78,10 @@ if (root !== startedIn) {
  * and this switches itself back to the live build.
  */
 const apiOrigin = process.env.VITE_API_ORIGIN?.trim()
-const buildStatic = !apiOrigin
+
+// `BUILD_STATIC=1` is the explicit request (npm run build:static). Otherwise it
+// is inferred: with no API origin there is nothing a live build could talk to.
+const buildStatic = process.env.BUILD_STATIC === '1' || !apiOrigin
 
 if (buildStatic) {
   console.warn(

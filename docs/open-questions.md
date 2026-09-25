@@ -708,3 +708,33 @@ The pattern worth keeping: **configuration that can be silently overridden is
 not configuration.** The same lesson as deriving the AEM write allowlist from
 config rather than restating it, and sharing `normalizeAssetPath` rather than
 copying it.
+
+
+## The build command moved, so the failure moved with it (2026-09-25)
+
+The install shim worked — the log shows `Installing in /vercel/path0, not
+/vercel/path0/apps/api` — and the build then failed on
+`Missing script: "build:static"`. Same shape as `tsc: command not found` and
+`Missing script: "build:ui"` before it: a command that exists in the workspace
+root being run from inside a workspace.
+
+Notable in its own right: that install line proves `vercel.json` **is** being
+read now, since `installCommand` is only defined there. Which command wins —
+the file's or a dashboard override — is not observable from the repo, and it
+has evidently changed at least once during this work.
+
+So the answer is to stop needing to know. `install:ui`, `build:ui` and
+`build:static` now exist in all three plausible manifests and delegate to the
+same two scripts. `build:static` forces the snapshot via `BUILD_STATIC=1`, so
+the script name still means what it says, while `build:ui` infers from
+`VITE_API_ORIGIN`.
+
+Verified across the full matrix — three roots by the commands each might be
+given, six combinations, all producing the correct build and output location:
+
+    .         build:ui      no origin   -> static, data emitted
+    .         build:static  no origin   -> static, data emitted
+    .         build:ui      origin set  -> live, origin baked in
+    apps/api  build:ui      no origin   -> static, mirrored
+    apps/api  build:static  no origin   -> static, mirrored
+    apps/ui   build:static  no origin   -> static, mirrored

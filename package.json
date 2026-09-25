@@ -24,7 +24,7 @@
     "build:ui": "node scripts/build-ui.mjs",
     "build:ui:workspace": "tsc --build packages/types && npm run build --workspace=@capella/ui",
     "// build:static": "Publishes the UI with the index baked in and no backend at all. The only free, always-on option for this tool: the worker needs a persistent process and Chromium, which no free tier provides, but everything the index already knows is static.",
-    "build:static": "node scripts/build-static-data.mjs && VITE_STATIC_DATA=true npm run build:ui:workspace",
+    "build:static": "BUILD_STATIC=1 node scripts/build-ui.mjs",
     "//test": "Every package is ESM, so ts-jest needs Node's ESM VM modules. Without the flag it silently downlevels to CommonJS and any file using import.meta fails to compile \u2014 three suites disappeared exactly that way.",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "test:e2e": "playwright test --config=apps/ui/playwright.config.ts",
