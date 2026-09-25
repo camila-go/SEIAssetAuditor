@@ -2,10 +2,17 @@ import { useEffect, useState, type DragEvent, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '../components/Layout'
 import { ErrorState, PhaseNotice } from '../components/States'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useCreateAudit } from '../api/queries'
 import { useAuditStore } from '../store/auditStore'
-import { RunViaActions } from '../components/RunViaActions'
 import { IS_STATIC } from '../api/client'
+import { checkService, fetchSnapshotDate, startAudit } from '../api/actions'
+import {
+  RemoteAuditProgress,
+  loadRemoteAudit,
+  saveRemoteAudit,
+  type RemoteAudit,
+} from '../components/RemoteAuditProgress'
 import { normalizeUrl } from '@capella/types'
 
 type InputMode = 'paste' | 'csv' | 'sitemap'
@@ -39,13 +46,56 @@ export default function StartAudit(): JSX.Element {
   const urlCount = parsedUrls.filter((line) => normalizeUrl(line) !== null).length
   const unreadableCount = parsedUrls.length - urlCount
 
-  // ── Handing URLs to the Actions workflow ──────────────────────────────────
+  // ── The published site ────────────────────────────────────────────────────
   //
-  // Only needed with no backend. The workflow takes a list of URLs and nothing
-  // else, so a CSV has to be read here in the browser rather than posted to an
-  // API that does not exist. A sitemap cannot be: expanding one means fetching
-  // it, and the page has no server to fetch it through.
+  // No backend here, so Start audit goes to the site's own audit service
+  // (api/run-audit.mjs) instead of the API. Same form, same button; the person
+  // using the tool should not be able to tell the difference except that
+  // results arrive when the audit finishes rather than page by page.
+  //
+  // A CSV is read in the browser, because the service takes a list of URLs.
+  // A sitemap is sent as-is and expanded by the service.
   const [csvUrls, setCsvUrls] = useState<string[]>([])
+  const [remoteAudit, setRemoteAudit] = useState<RemoteAudit | null>(() =>
+    IS_STATIC ? loadRemoteAudit() : null,
+  )
+
+  const service = useQuery({
+    queryKey: ['audit-service'],
+    queryFn: checkService,
+    enabled: IS_STATIC,
+    staleTime: 5 * 60_000,
+  })
+  const serviceBlocked =
+    service.data?.kind === 'not-configured' || service.data?.kind === 'missing'
+
+  const startRemote = useMutation({
+    mutationFn: async () => {
+      const snapshotBefore = await fetchSnapshotDate()
+      const started = await startAudit({
+        name: name.trim(),
+        ...(mode === 'sitemap' ? { sitemapUrl: sitemapUrl.trim() } : { urls: dispatchableUrls }),
+      })
+      return { ...started, snapshotBefore }
+    },
+    onSuccess: (started) => {
+      const audit: RemoteAudit = {
+        since: started.startedAt,
+        clickedAt: new Date().toISOString(),
+        totalUrls: started.totalUrls,
+        name: name.trim(),
+        snapshotBefore: started.snapshotBefore,
+      }
+      saveRemoteAudit(audit)
+      setRemoteAudit(audit)
+    },
+  })
+
+  function dismissRemoteAudit(): void {
+    saveRemoteAudit(null)
+    setRemoteAudit(null)
+    startRemote.reset()
+  }
 
   useEffect(() => {
     if (!IS_STATIC || mode !== 'csv' || file === null) {
@@ -78,15 +128,23 @@ export default function StartAudit(): JSX.Element {
         ? parsedUrls.filter((line) => normalizeUrl(line) !== null)
         : []
 
-  const canSubmit =
-    !createAudit.isPending &&
-    ((mode === 'paste' && urlCount > 0) ||
-      (mode === 'csv' && file !== null) ||
-      (mode === 'sitemap' && sitemapUrl.trim().length > 0))
+  const hasInput =
+    (mode === 'paste' && urlCount > 0) ||
+    (mode === 'csv' && (IS_STATIC ? csvUrls.length > 0 : file !== null)) ||
+    (mode === 'sitemap' && sitemapUrl.trim().length > 0)
+
+  const canSubmit = IS_STATIC
+    ? hasInput && !startRemote.isPending && !serviceBlocked
+    : hasInput && !createAudit.isPending
 
   async function handleSubmit(event: FormEvent): Promise<void> {
     event.preventDefault()
     if (!canSubmit) return
+
+    if (IS_STATIC) {
+      startRemote.mutate()
+      return
+    }
 
     const result = await createAudit.mutateAsync({
       ...(name.trim() ? { name: name.trim() } : {}),
@@ -121,10 +179,31 @@ export default function StartAudit(): JSX.Element {
         description="Scrapes each page for DAM asset references and testimonials. Runs in the background — you can close this tab."
       />
 
+      {remoteAudit ? (
+        <div className="mb-6">
+          <RemoteAuditProgress audit={remoteAudit} onDismiss={dismissRemoteAudit} />
+        </div>
+      ) : null}
+
       <PhaseNotice>
-        A 1000-URL audit takes roughly 60–90 minutes at safe scraping rates. Results are queryable
-        as soon as the first batch lands, so there is no need to wait for the whole job.
+        {IS_STATIC
+          ? 'An audit takes a few minutes to start, then about ten seconds a page. The findings appear throughout the tool when it finishes.'
+          : 'A 1000-URL audit takes roughly 60–90 minutes at safe scraping rates. Results are queryable as soon as the first batch lands, so there is no need to wait for the whole job.'}
       </PhaseNotice>
+
+      {IS_STATIC && service.data?.kind === 'not-configured' ? (
+        <div className="mt-4 rounded-md border border-caution-200 bg-caution-50 px-4 py-3 text-sm text-caution-900">
+          {service.data.message}
+        </div>
+      ) : null}
+
+      {IS_STATIC && service.data?.kind === 'missing' ? (
+        <div className="mt-4 rounded-md border border-caution-200 bg-caution-50 px-4 py-3 text-sm text-caution-900">
+          Audits cannot start on this site: it was published without its audit service. Whoever
+          manages the Vercel project needs to set <strong>Root Directory</strong> to the
+          repository root and redeploy — see docs/deploy-runbook.md.
+        </div>
+      ) : null}
 
       <form onSubmit={(event) => void handleSubmit(event)} className="mt-6 space-y-6">
         <div>
@@ -246,40 +325,34 @@ export default function StartAudit(): JSX.Element {
 
         {createAudit.isError ? <ErrorState error={createAudit.error} /> : null}
 
-        {/* With no backend the submit button cannot do anything, so it is
-            replaced rather than left to fail. The URLs typed above are handed
-            to the Actions workflow, which runs the real scraper. */}
-        {IS_STATIC ? null : (
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            data-testid="audit-submit"
-            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-ink-300"
+        {startRemote.isError ? (
+          <div
+            role="alert"
+            className="rounded-md border border-critical-200 bg-critical-50 px-4 py-3 text-sm text-critical-800"
           >
-            {createAudit.isPending ? 'Queueing…' : 'Start audit'}
-          </button>
-        )}
-      </form>
+            {(startRemote.error as Error).message}
+          </div>
+        ) : null}
 
-      {IS_STATIC ? (
-        <div className="mt-6">
-          <RunViaActions
-            urls={dispatchableUrls}
-            name={name.trim()}
-            disabled={dispatchableUrls.length === 0}
-          />
-          {mode === 'sitemap' ? (
-            <p className="mt-2 text-xs text-ink-500">
-              A sitemap has to be fetched and expanded before the run starts, which needs the
-              backend. Paste the URLs instead, or start the run from GitHub where the workflow
-              can read the sitemap itself.
-            </p>
-          ) : null}
-          {mode === 'csv' && file !== null && csvUrls.length === 0 ? (
-            <p className="mt-2 text-xs text-ink-500">Reading the file…</p>
-          ) : null}
-        </div>
-      ) : null}
+        {IS_STATIC && mode === 'csv' && file !== null && csvUrls.length === 0 ? (
+          <p className="text-xs text-ink-500">No web addresses found in the first column of that file.</p>
+        ) : null}
+
+        <button
+          type="submit"
+          disabled={!canSubmit || (IS_STATIC && remoteAudit !== null)}
+          data-testid="audit-submit"
+          className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-ink-300"
+        >
+          {createAudit.isPending || startRemote.isPending ? 'Starting…' : 'Start audit'}
+        </button>
+
+        {IS_STATIC && remoteAudit !== null ? (
+          <p className="text-xs text-ink-500">
+            One audit at a time — start another once the current one finishes.
+          </p>
+        ) : null}
+      </form>
     </div>
   )
 }

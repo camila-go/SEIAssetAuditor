@@ -13,7 +13,8 @@ run-name: "${{ github.event_name == 'schedule' && 'Scheduled link check' || (inp
 # minutes an audit actually takes, and public repositories get unlimited
 # minutes — so running audits costs nothing and depends on no one's laptop.
 #
-# Start it from the Actions tab: "Run an audit" → "Run workflow".
+# Normally started from the tool's own Audit page, through api/run-audit.mjs.
+# It can also be started from the Actions tab: "Run an audit" → "Run workflow".
 
 on:
   workflow_dispatch:
@@ -25,6 +26,9 @@ on:
           https://www.capella.edu/
           https://www.capella.edu/capella-experience/about/
           https://www.capella.edu/online-degrees/
+      sitemap:
+        description: 'Or a sitemap URL to audit instead (optional)'
+        required: false
       name:
         description: 'Audit name (optional)'
         required: false
@@ -50,7 +54,9 @@ concurrency:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # The full sitemap is ~1,500 pages, roughly 2.5 hours. GitHub-hosted jobs
+    # may run for six; this leaves headroom without letting a hang run forever.
+    timeout-minutes: 330
 
     services:
       postgres:
@@ -134,6 +140,7 @@ jobs:
       - name: Run the audit
         env:
           AUDIT_URLS: ${{ github.event.inputs.urls }}
+          AUDIT_SITEMAP: ${{ github.event.inputs.sitemap }}
           AUDIT_NAME: ${{ github.event.inputs.name }}
         # On the scheduled run there are no inputs; skip straight to revalidation.
         if: github.event_name == 'workflow_dispatch'

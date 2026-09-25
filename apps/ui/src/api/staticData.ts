@@ -98,10 +98,20 @@ const AEM_PUBLIC_HOST = 'https://www.capella.edu'
 
 let cache: Promise<StaticPayload> | null = null
 
+/**
+ * Drop the loaded snapshot so the next read fetches the new one.
+ *
+ * Called when an audit started from this page has finished and the site has
+ * rebuilt with its findings, so they appear without a manual reload.
+ */
+export function reloadStaticData(): void {
+  cache = null
+}
+
 function load(): Promise<StaticPayload> {
   // Fetched once and reused. A rejected promise is cleared so a transient
   // network failure on first load does not permanently break the page.
-  cache ??= fetch(`${import.meta.env.BASE_URL}data/index.json`)
+  cache ??= fetch(`${import.meta.env.BASE_URL}data/index.json`, { cache: 'no-cache' })
     .then((response) => {
       if (!response.ok) throw new Error(`Snapshot unavailable (HTTP ${response.status})`)
       return response.json() as Promise<StaticPayload>

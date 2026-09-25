@@ -145,22 +145,23 @@ Redis, the worker — inside an Actions job, then commits the refreshed index
 back. The static site rebuilds on that push. It also runs the three-day
 link-rot check on a schedule.
 
-**Audits are started from the tool's own Audit page.** Paste URLs or upload a
-CSV as normal; the page hands them to the workflow and lists recent runs live
-from GitHub. Out of the box that is two clicks (copy the URLs, confirm on
-GitHub). With a token in a Vercel serverless function it is one — see
+**Audits are started from the tool's own Audit page**, exactly as with a
+backend: paste URLs, upload a CSV or give a sitemap, press **Start audit**. The
+page follows the audit and loads the new findings when it finishes. Nobody
+using the tool touches GitHub; the site's audit service (`api/run-audit.mjs`)
+starts and watches the job. It needs a one-time access key and the right Vercel
+Root Directory — see
 [the free path in the runbook](docs/deploy-runbook.md#the-free-path--no-render-no-cost).
-Every run also writes a summary to its GitHub page: what was scraped, what was
-found, and whether any indexed asset has stopped being served.
+Each run also writes a summary to its GitHub page for whoever maintains the tool.
 
 This repository is public, and **public repositories get unlimited Actions
 minutes**, so it costs nothing. Nothing is always-on; the stack exists for the
 minutes an audit takes and then goes away.
 
-What you give up against Option B: results appear after the run finishes and
-the site rebuilds — a few minutes — rather than streaming in page by page, and
-a sitemap has to be expanded into URLs first. For a tool that is run
-occasionally against a set of URLs, that is a small loss.
+What you give up against Option B: results appear when the audit finishes and
+the site has updated — a few minutes after — rather than page by page, and one
+audit runs at a time. For a tool run occasionally against a set of URLs, that is
+a small loss.
 
 ### What is not viable
 

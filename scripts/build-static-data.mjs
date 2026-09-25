@@ -153,6 +153,10 @@ const payload = {
 mkdirSync(OUT_DIR, { recursive: true })
 const out = join(OUT_DIR, 'index.json')
 writeFileSync(out, JSON.stringify(payload))
+// A few bytes the Audit page polls after an audit finishes, to know when the
+// rebuilt site with the new findings is live — without re-downloading the
+// whole index every 30 seconds to read one date.
+writeFileSync(join(OUT_DIR, 'version.json'), JSON.stringify({ generatedAt: payload.generatedAt }))
 
 const kb = (readFileSync(out).length / 1024).toFixed(0)
 console.log(

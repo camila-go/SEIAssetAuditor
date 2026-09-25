@@ -17,12 +17,19 @@
 
 const API = process.env.API_URL ?? 'http://127.0.0.1:3001'
 const POLL_MS = 5_000
-/** A 1000-URL audit is 60–90 minutes; this is the ceiling before we give up. */
-const TIMEOUT_MS = Number(process.env.AUDIT_TIMEOUT_MS ?? 100 * 60 * 1000)
+/**
+ * A 1000-URL audit is 60–90 minutes and the full sitemap is ~1,500 pages; this
+ * is the ceiling before we give up. Inside the job's own 330-minute timeout.
+ */
+const TIMEOUT_MS = Number(process.env.AUDIT_TIMEOUT_MS ?? 300 * 60 * 1000)
 
 const urls = (process.env.AUDIT_URLS ?? '').trim()
-if (!urls) {
-  console.error('[ci-audit] AUDIT_URLS is empty. Nothing to audit.')
+// A sitemap is passed through rather than expanded upstream: GitHub caps a
+// run's inputs at 65,535 characters, and capella.edu's 1,527 URLs are ~90KB.
+// The API expands it here, inside the job, exactly as it does for the UI.
+const sitemapUrl = (process.env.AUDIT_SITEMAP ?? '').trim()
+if (!urls && !sitemapUrl) {
+  console.error('[ci-audit] Neither AUDIT_URLS nor AUDIT_SITEMAP is set. Nothing to audit.')
   process.exit(1)
 }
 
@@ -59,7 +66,7 @@ console.log('')
 const created = await json('/api/v1/audit', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ name, urls }),
+  body: JSON.stringify(sitemapUrl ? { name, sitemapUrl } : { name, urls }),
 })
 
 const { jobId, totalUrls, skipped = [] } = created.data

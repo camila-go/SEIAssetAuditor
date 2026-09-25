@@ -102,7 +102,7 @@ test. None of this needs an AEM account, an API key, or anything from IT.
 | CSV export — audits and testimonials | Both return 200 with well-formed, formula-escaped CSV |
 | Published / Draft / Unknown status | Scraped heuristic; reports Unknown honestly rather than guessing |
 | Link-rot check, every three days | All 779 assets re-checked: 770 served, 8 no longer served, **1 soft 404** — answers HTTP 200 with the site's own error page. A status-only check had filed that one as live |
-| Start audits from the published site | The Audit page hands URLs to the GitHub Actions workflow and lists runs live from GitHub, with no backend. Two clicks with no setup — verified in the browser against the real run history. One click with a token: every branch of `api/run-audit.mjs` exercised against a mocked GitHub, **never against a real token** — none exists yet |
+| Start audits from the published site | Same form and **Start audit** button; progress and the new findings shown in the tool, no GitHub account needed. Verified in the browser against the real `api/run-audit.mjs` with GitHub simulated: started, followed every stage, loaded the rebuilt findings; and with no key, the page explains and disables the button. Sitemap expansion verified against the live 1,527-page sitemap. **Never run against a real token** — none exists yet |
 
 > **Duplicate detection is not a Phase 2 feature.** The PRD files it under Phase 2,
 > behind the AEM service account. It does not need one — DAM assets are publicly
