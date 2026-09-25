@@ -674,3 +674,37 @@ commit step correctly detecting five changed files.
 Still unverified: the GitHub runner itself — service containers, the Playwright
 and model caches, and the push. The workflow is registered and active on the
 repository with no runs yet.
+
+
+## A live-API build reached production with no API (found 2026-09-25)
+
+Reported as a recurring Vercel error, but the log was stale — it predated the
+build shim. The real problem was on the deployed site, and it was quiet.
+
+The bundle served by Vercel compiled `IS_STATIC` as
+`(env?.VITE_STATIC_DATA)==="true"` — byte-identical to a local **non-static**
+build, where Vite leaves the lookup in. In a static build Vite replaces it with
+a literal and the string does not appear at all. So production was running the
+live-API build with no API: every request went to its own origin, GETs came back
+as the app's own HTML with a 200, and `/data/index.json` 404'd into the SPA
+fallback. The site loaded and did nothing.
+
+`vercel.json` said `buildCommand: npm run build:static`. It was not being used.
+A host's dashboard settings override that file, and with the Root Directory
+pointing inside a workspace it is not read at all — so the dashboard's older
+`npm run build:ui` won, and `VITE_STATIC_DATA` was never set.
+
+The fix is to stop expressing the choice somewhere a dashboard can override.
+`scripts/build-ui.mjs` now decides from the environment: no `VITE_API_ORIGIN`
+means there is no API to talk to, so the only build that can work is the one
+that needs none. Setting `VITE_API_ORIGIN` switches it back.
+
+Verified in all three shapes: no origin → static build with its data file; origin
+set → live build with the origin baked in and the runtime flag intact; and from
+`apps/api` with no origin — Vercel's exact situation — a static build correctly
+mirrored to where `outputDirectory` resolves.
+
+The pattern worth keeping: **configuration that can be silently overridden is
+not configuration.** The same lesson as deriving the AEM write allowlist from
+config rather than restating it, and sharing `normalizeAssetPath` rather than
+copying it.

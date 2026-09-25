@@ -62,7 +62,43 @@ if (root !== startedIn) {
   )
 }
 
-execFileSync('npm', ['run', 'build:ui:workspace'], { cwd: root, stdio: 'inherit' })
+/**
+ * With no API origin configured, the only build that can work is the one that
+ * needs no API.
+ *
+ * Not a preference — a correctness rule. Building the live-API UI without
+ * `VITE_API_ORIGIN` produces a site whose every request goes to its own origin,
+ * where nothing serves `/api`: GETs come back as the app's own HTML with a 200
+ * and POSTs as a 405. That is exactly the deployment that was live, and it is
+ * indistinguishable from a broken tool.
+ *
+ * This decides from the environment rather than from `vercel.json`, because a
+ * host's dashboard settings override that file — and when its Root Directory
+ * points inside a workspace the file is not read at all. Set `VITE_API_ORIGIN`
+ * and this switches itself back to the live build.
+ */
+const apiOrigin = process.env.VITE_API_ORIGIN?.trim()
+const buildStatic = !apiOrigin
+
+if (buildStatic) {
+  console.warn(
+    '[build-ui] VITE_API_ORIGIN is not set, so there is no API to talk to.\n' +
+      '[build-ui] Building the read-only snapshot instead — see HANDOFF.md.\n' +
+      '[build-ui] Set VITE_API_ORIGIN to build the live version.',
+  )
+  execFileSync('node', [join(root, 'scripts', 'build-static-data.mjs')], {
+    cwd: root,
+    stdio: 'inherit',
+  })
+} else {
+  console.log(`[build-ui] Building the live UI against ${apiOrigin}.`)
+}
+
+execFileSync('npm', ['run', 'build:ui:workspace'], {
+  cwd: root,
+  stdio: 'inherit',
+  env: buildStatic ? { ...process.env, VITE_STATIC_DATA: 'true' } : process.env,
+})
 
 const built = join(root, OUTPUT)
 if (!existsSync(built)) {

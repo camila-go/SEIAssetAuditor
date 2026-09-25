@@ -72,14 +72,19 @@ applies committed migrations — it can never reset the database the way
 Same repo, **Root Directory left at the repository root**. `vercel.json` does
 the rest.
 
-It builds `npm run build:static` by default — the read-only snapshot, which
-needs no backend. That is the right default while no API is deployed: the
-alternative builds a UI whose every request fails, which is what produced the
-`405` and the `200 text/html` confusion earlier.
+**Which build you get is decided by `VITE_API_ORIGIN`, not by a build command.**
 
-**Once a backend is running**, change `buildCommand` to `npm run build:ui` and
-set `VITE_API_ORIGIN`. That switches the deployment from a frozen snapshot to
-the live tool.
+- Unset → the read-only snapshot, which needs no backend.
+- Set → the live UI, pointed at that origin.
+
+That choice lives in `scripts/build-ui.mjs` rather than in `vercel.json` on
+purpose. A host's dashboard settings override that file, and when its Root
+Directory points inside a workspace the file is not read at all — which is how a
+live-API build reached production with no API behind it, answering every request
+with its own HTML and a 200. Deciding from the environment means the deployment
+cannot end up in that state whatever the dashboard says.
+
+To go live: set `VITE_API_ORIGIN` and redeploy. Nothing else changes.
 
 > **The Root Directory must be the repository root.** This has now broken the
 > build twice, with two different-looking errors and one cause:
