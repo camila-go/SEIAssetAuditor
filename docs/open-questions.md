@@ -599,3 +599,40 @@ Vercel's build command now defaults to `npm run build:static`. While no backend
 is deployed, building the live-API UI produces a site where every request fails
 — which is exactly the `405` and `200 text/html` confusion reported earlier.
 Switching back is one line, documented in `docs/deployment.md`.
+
+
+## The snapshot did not link assets to URLs (found 2026-09-25)
+
+Reported as "build the backend so assets, urls, and audits link and are saved".
+The backend does save all of that — 779 assets, 111 pages and 3,460 references
+were in Postgres the whole time. The **static snapshot** was not showing the
+links, which from the outside is the same thing.
+
+Three defects, all in the static adapter:
+
+- **`/lookup` was never implemented.** Reverse lookup — "where is this asset
+  used?", the tool's headline question — returned a 501 while the banner above
+  it promised "the page maps all work". The most prominent feature was the one
+  the snapshot could not answer.
+- **Detail pages returned the wrong key.** The API returns `pages`; the adapter
+  returned `references`. Asset and testimonial detail therefore rendered an
+  empty page list with no error — the worst shape of failure, because it looks
+  like an answer.
+- **The reference `discoveredAt` was dropped** from the payload, so even a
+  correct page list had no "first seen" date.
+
+Also fixed while here: the testimonial list was missing `referenceCount`,
+`daysSinceLastSeen` and `isActive`, so freshness badges and page counts were
+blank.
+
+**`normalizeAssetPath` moved to `@capella/types`.** The lookup has to resolve a
+public URL, a rendition URL and a bare DAM path to one asset, and that function
+has already had three separate bugs — the narrow DAM root, the `);` left on
+paths lifted out of CSS, and the `_jcr_content` spelling. A second copy in the
+UI would have had a fourth. Same reasoning as `parseSearchTerms` and
+`normalizeUrl`: one rule, one place, so the thing being tested is the thing
+being used.
+
+Verified in the built snapshot: a rendition URL resolves to its asset and lists
+three real pages; asset detail shows "Used on 1 page"; testimonial detail shows
+"Appears on 1 page". Payload 125KB → 130KB gzipped.

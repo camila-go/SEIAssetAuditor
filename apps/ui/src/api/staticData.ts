@@ -1,4 +1,4 @@
-import { parseSearchTerms } from '@capella/types'
+import { normalizeAssetPath, parseSearchTerms } from '@capella/types'
 
 /**
  * Serve the UI from a snapshot instead of an API.
@@ -65,8 +65,12 @@ interface StaticPayload {
   assets: StaticAsset[]
   pages: StaticPage[]
   testimonials: StaticTestimonial[]
-  assetPageReferences: Array<{ assetId: string; pageId: string }>
-  testimonialPageReferences: Array<{ testimonialId: string; pageId: string }>
+  assetPageReferences: Array<{ assetId: string; pageId: string; discoveredAt: string | null }>
+  testimonialPageReferences: Array<{
+    testimonialId: string
+    pageId: string
+    discoveredAt: string | null
+  }>
   auditJobs: Array<Record<string, unknown>>
   auditJobUrls: Array<{
     id: string
@@ -127,6 +131,52 @@ function paginate<T>(rows: T[], query: URLSearchParams): { data: T[]; meta: { pa
 function matches(query: string, fields: Array<string | null>): boolean {
   const haystack = fields.filter(Boolean).join(' ').toLowerCase()
   return parseSearchTerms(query).every((term) => haystack.includes(term.toLowerCase()))
+}
+
+/**
+ * The page list, in the shape the API returns it.
+ *
+ * `pages`, not `references` — this adapter used the wrong key, so every asset
+ * and testimonial detail page rendered an empty list. The link between an asset
+ * and the URLs it appears on is the whole point of the tool, and it was the one
+ * thing the snapshot did not show.
+ */
+function pagesFor(
+  db: StaticPayload,
+  ids: Array<{ pageId: string; discoveredAt: string | null }>,
+): Array<Record<string, unknown>> {
+  const byId = new Map(db.pages.map((page) => [page.id, page]))
+
+  const rows: Array<Record<string, unknown>> = []
+
+  for (const ref of ids) {
+    const page = byId.get(ref.pageId)
+    if (!page) continue
+
+    rows.push({
+      pageId: page.id,
+      url: page.url,
+      title: page.title,
+      // The snapshot records only what the crawl concluded, and `unknown` is
+      // the honest value for anything it could not confirm — same as the API.
+      liveStatus: page.isPublished ? 'published' : 'unknown',
+      lastCrawledAt: page.crawledAt,
+      discoveredAt: ref.discoveredAt,
+    })
+  }
+
+  return rows
+}
+
+function testimonialOut(t: StaticTestimonial, refCount: number): Record<string, unknown> {
+  const days = Math.floor((Date.now() - new Date(t.lastSeenAt).getTime()) / 86_400_000)
+  return {
+    ...t,
+    referenceCount: refCount,
+    daysSinceLastSeen: days,
+    isActive: days <= 90,
+    matchReasons: [],
+  }
 }
 
 function assetOut(asset: StaticAsset, refCount: number): Record<string, unknown> {
@@ -200,13 +250,38 @@ export async function staticGet(
     const asset = db.assets.find((a) => a.id === id)
     if (!asset) throw new StaticUnsupportedError('That asset')
 
-    const pageIds = new Set(db.assetPageReferences.filter((r) => r.assetId === id).map((r) => r.pageId))
-    return {
-      data: {
-        ...assetOut(asset, pageIds.size),
-        references: db.pages.filter((page) => pageIds.has(page.id)),
-      },
+    const refs = db.assetPageReferences.filter((r) => r.assetId === id)
+    return { data: { ...assetOut(asset, refs.length), pages: pagesFor(db, refs) } }
+  }
+
+  // ── Reverse lookup ────────────────────────────────────────────────────────
+  //
+  // The tool's headline question — "where is this asset used?" — and the one
+  // thing the snapshot could not answer, because this path was never handled.
+  // It returned a 501 while the banner promised the page maps worked.
+  if (p === '/lookup') {
+    const raw = query.get('path')?.trim()
+    if (!raw) throw new StaticUnsupportedError('A lookup without a path')
+
+    // The same normalizer the API uses, from @capella/types: a public URL, a
+    // rendition URL and a bare DAM path must all resolve to one asset, and a
+    // second implementation here would drift from the one being tested.
+    const aemPath = normalizeAssetPath(raw)
+    if (aemPath === null) {
+      throw new StaticUnsupportedError(
+        `"${raw.slice(0, 60)}" is not a DAM asset path, so lookup`,
+      )
     }
+
+    const asset = db.assets.find((a) => a.aemPath === aemPath)
+    if (!asset) {
+      throw new StaticUnsupportedError(
+        `${aemPath} is not in this snapshot — it may exist but sit on a page nobody audited, so lookup`,
+      )
+    }
+
+    const refs = db.assetPageReferences.filter((r) => r.assetId === asset.id)
+    return { data: { ...assetOut(asset, refs.length), pages: pagesFor(db, refs) } }
   }
 
   // ── Testimonials ──────────────────────────────────────────────────────────
@@ -244,7 +319,15 @@ export async function staticGet(
     if (search) rows = rows.filter((t) => matches(search, [t.quoteText, t.studentName, t.program]))
 
     const { data, meta } = paginate(rows, query)
-    return { data: data.map((t) => ({ ...t, matchReasons: [], pageCount: 0 })), meta }
+    const testimonialRefCounts = new Map<string, number>()
+    for (const ref of db.testimonialPageReferences) {
+      testimonialRefCounts.set(ref.testimonialId, (testimonialRefCounts.get(ref.testimonialId) ?? 0) + 1)
+    }
+
+    return {
+      data: data.map((t) => testimonialOut(t, testimonialRefCounts.get(t.id) ?? 0)),
+      meta,
+    }
   }
 
   if (p.startsWith('/testimonials/')) {
@@ -252,11 +335,16 @@ export async function staticGet(
     const testimonial = db.testimonials.find((t) => t.id === id)
     if (!testimonial) throw new StaticUnsupportedError('That testimonial')
 
-    const pageIds = new Set(
-      db.testimonialPageReferences.filter((r) => r.testimonialId === id).map((r) => r.pageId),
-    )
+    const refs = db.testimonialPageReferences.filter((r) => r.testimonialId === id)
     return {
-      data: { ...testimonial, references: db.pages.filter((page) => pageIds.has(page.id)) },
+      data: {
+        ...testimonialOut(testimonial, refs.length),
+        rawHtml: null,
+        aemComponentPath: null,
+        quoteFingerprint: null,
+        deletedAt: null,
+        pages: pagesFor(db, refs),
+      },
     }
   }
 

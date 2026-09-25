@@ -107,10 +107,15 @@ const payload = {
   assets: leanAssets,
   pages: leanPages,
   testimonials: leanTestimonials,
-  assetPageReferences: refs.map((r) => ({ assetId: r.assetId, pageId: r.pageId })),
+  assetPageReferences: refs.map((r) => ({
+    assetId: r.assetId,
+    pageId: r.pageId,
+    discoveredAt: r.discoveredAt,
+  })),
   testimonialPageReferences: testimonialRefs.map((r) => ({
     testimonialId: r.testimonialId,
     pageId: r.pageId,
+    discoveredAt: r.discoveredAt,
   })),
   // Per-URL rows, so a job page — including its failures — opens without an
   // API. The dashboard links straight at these, and without them those links
