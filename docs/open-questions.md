@@ -636,3 +636,41 @@ being used.
 Verified in the built snapshot: a rendition URL resolves to its asset and lists
 three real pages; asset detail shows "Used on 1 page"; testimonial detail shows
 "Appears on 1 page". Payload 125KB → 130KB gzipped.
+
+
+## Verifying the CI audit workflow (2026-09-25)
+
+The workflow cannot be run from a laptop, so every step was executed by hand
+against an isolated copy of the real stack: a fresh `ci_sim` database, Redis on
+a separate db index so the dev queue was untouched, the API on a different port,
+and the worker and API started **from `dist`** — which is how CI runs them and
+had never been tried.
+
+Everything passed except one step, which was wrong in a way that would have been
+invisible.
+
+**The revalidation wait exited immediately.** The loop waited for
+`checked >= total`, but the index is restored *with* verification timestamps
+already on it, so that was true before the forced re-check did anything. The
+workflow would have snapshotted a stale result and reported success. On a
+scheduled run — whose entire purpose is the re-check — it would have done
+nothing at all, every three days, quietly.
+
+Fixed by comparing against time instead of count: record when the re-check was
+queued, then wait until the **oldest** check in the index is newer than that.
+That is only true once every row has genuinely been re-checked. Re-tested, and
+the corrected loop takes about four minutes for 779 assets, with `oldestCheck`
+visibly climbing from the previous day's timestamps to today's.
+
+That is the same failure this tool keeps finding in itself, this time in its own
+CI: a condition that is technically true while meaning nothing.
+
+Confirmed working: `db:deploy` on an empty database, `db:restore` (4,610 rows),
+`embed:prewarm`, the exact `tsc --build` project list, worker and API booting
+from `dist`, `ci-audit.mjs` driving a two-URL audit to completion and reporting
+`not-a-page.png` as skipped, the sweep wait, `db:snapshot` (4,613 rows), and the
+commit step correctly detecting five changed files.
+
+Still unverified: the GitHub runner itself — service containers, the Playwright
+and model caches, and the push. The workflow is registered and active on the
+repository with no runs yet.

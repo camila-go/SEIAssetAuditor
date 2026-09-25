@@ -138,16 +138,27 @@ jobs:
       - name: Re-check that indexed assets are still served
         if: github.event_name == 'schedule' || github.event.inputs.revalidate == 'true'
         run: |
+          # The index is restored with verification timestamps already on it, so
+          # "checked === total" is true before a forced re-check does anything.
+          # Waiting on that let the workflow snapshot a stale result. Wait until
+          # the OLDEST check is newer than the moment we queued it instead —
+          # that is only true once every row has actually been re-checked.
+          started=$(date -u +%s)
           curl -fsS -X POST "http://127.0.0.1:3001/api/v1/assets/verification?force=true" > /dev/null
-          echo "Queued. Waiting for it to settle…"
-          for i in $(seq 1 60); do
+          echo "Queued at $started. Waiting for every row to be re-checked…"
+
+          for i in $(seq 1 80); do
             sleep 15
             body=$(curl -fsS http://127.0.0.1:3001/api/v1/assets/verification)
-            echo "  $body" | head -c 200; echo
             node -e "
               const d = JSON.parse(process.argv[1]).data
-              process.exit(d.checked >= d.total ? 0 : 1)
-            " "$body" && break
+              const started = Number(process.argv[2]) * 1000
+              const oldest = d.oldestCheck ? Date.parse(d.oldestCheck) : 0
+              console.log('  checked ' + d.checked + '/' + d.total +
+                          '  live=' + d.live + ' missing=' + d.missing +
+                          '  oldest=' + (d.oldestCheck ?? 'never'))
+              process.exit(oldest >= started ? 0 : 1)
+            " "$body" "$started" && { echo '  every row re-checked'; break; }
           done
 
       - name: Let the fingerprint and embedding sweeps finish
