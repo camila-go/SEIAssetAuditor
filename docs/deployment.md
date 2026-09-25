@@ -70,7 +70,16 @@ applies committed migrations — it can never reset the database the way
 ### 2. Frontend — Vercel
 
 Same repo, **Root Directory left at the repository root**. `vercel.json` does
-the rest: it runs `npm run build:ui` and serves `apps/ui/dist`.
+the rest.
+
+It builds `npm run build:static` by default — the read-only snapshot, which
+needs no backend. That is the right default while no API is deployed: the
+alternative builds a UI whose every request fails, which is what produced the
+`405` and the `200 text/html` confusion earlier.
+
+**Once a backend is running**, change `buildCommand` to `npm run build:ui` and
+set `VITE_API_ORIGIN`. That switches the deployment from a frozen snapshot to
+the live tool.
 
 > **The Root Directory must be the repository root.** This has now broken the
 > build twice, with two different-looking errors and one cause:

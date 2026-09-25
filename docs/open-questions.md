@@ -565,3 +565,37 @@ now says "Every URL in this audit failed" and points at the reasons below.
 All four are the same failure: the interface describing a state it is not
 actually in. Cheap to fix, and each one costs a person real time before they
 work out the message was wrong rather than the data.
+
+
+## Running audits for free, without a server (added 2026-09-25)
+
+The static snapshot can show findings but not produce them — crawling needs a
+browser, a queue and a database, and no free host provides a persistent worker.
+That framing turned out to be the mistake. The tool does not need to be
+always-on. It needs to **crawl occasionally** and **serve findings
+continuously**, and those two halves can live in different places.
+
+`.github/workflows/audit.yml` runs the real stack inside a GitHub Actions job:
+Postgres and Redis as service containers, Chromium on the runner, the actual
+worker and API processes. It restores the committed index first so an audit adds
+to it, waits for the fingerprint and embedding sweeps to settle, exports the
+refreshed snapshot and commits it. The static site rebuilds on that push.
+
+This repository is public, and public repositories get unlimited Actions
+minutes, so it is free. Nothing runs between audits.
+
+Two deliberate choices:
+
+- **The driver talks to the API over HTTP** rather than importing the services.
+  CI therefore exercises the same path a person does — including the URL parsing
+  that has twice turned non-URLs into audits — rather than a shortcut only CI
+  uses. It proved its worth immediately: the first local run correctly reported
+  `not-a-url.jpg` as skipped.
+- **Per-URL failures do not fail the workflow**; a job that fails outright does.
+  That mirrors the tool's own rule that one bad URL never stops a job, and keeps
+  a red X meaning something.
+
+Vercel's build command now defaults to `npm run build:static`. While no backend
+is deployed, building the live-API UI produces a site where every request fails
+— which is exactly the `405` and `200 text/html` confusion reported earlier.
+Switching back is one line, documented in `docs/deployment.md`.

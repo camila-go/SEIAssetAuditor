@@ -133,13 +133,37 @@ Two things that are not optional:
   OOM-killed on less, and it surfaces as every URL in a batch failing for no
   stated reason.
 
+### Option A+ — free, and audits still run
+
+The gap in Option A is that a snapshot cannot produce new findings. GitHub
+Actions closes it.
+
+`.github/workflows/audit.yml` runs the **real** tool — Chromium, Postgres,
+Redis, the worker — inside an Actions job, then commits the refreshed index
+back. The static site rebuilds on that push. Actions → **Run an audit** → **Run
+workflow**, paste URLs, done. It also runs the three-day link-rot check on a
+schedule.
+
+This repository is public, and **public repositories get unlimited Actions
+minutes**, so it costs nothing. Nothing is always-on; the stack exists for the
+minutes an audit takes and then goes away.
+
+What you give up against Option B: audits are started from the Actions tab
+rather than the tool's own form, and results appear after the job finishes
+rather than streaming in. For a tool that is run occasionally against a set of
+URLs, that is a small loss.
+
 ### What is not viable
 
-Free always-on hosting. Render does not offer background workers on its free
-plan at all; free web services sleep after 15 minutes, which kills a 60–90
-minute audit; free Redis loses its data on restart, taking the job queue with
-it. Fly and Railway have both removed their free allowances. This was checked,
-not assumed.
+Free always-on *hosting* — a backend sitting there answering requests. Render
+offers no background workers on its free plan at all; free web services sleep
+after 15 minutes, which kills a 60–90 minute audit; free Redis loses its data on
+restart, taking the job queue with it. Fly and Railway have both removed their
+free allowances. Checked against their documentation, not assumed.
+
+That is what makes Option A+ the answer rather than a workaround: the tool does
+not actually need to be always-on. It needs to crawl occasionally and serve
+findings continuously, and those two halves can live in different places.
 
 ### Before real credentials go anywhere
 

@@ -1,0 +1,192 @@
+name: Run an audit
+
+# Runs the real tool — Chromium, Postgres, Redis, the worker — inside a GitHub
+# Actions job, and commits the resulting index back to the repo. The static site
+# rebuilds on that push, so the published snapshot gains the new findings.
+#
+# This exists because the tool needs a persistent worker, a browser and two
+# databases, and no free host offers all three. Actions gives them for the
+# minutes an audit actually takes, and public repositories get unlimited
+# minutes — so running audits costs nothing and depends on no one's laptop.
+#
+# Start it from the Actions tab: "Run an audit" → "Run workflow".
+
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: 'URLs to audit, one per line'
+        required: false
+        default: |
+          https://www.capella.edu/
+          https://www.capella.edu/about/
+          https://www.capella.edu/online-degrees/
+      name:
+        description: 'Audit name (optional)'
+        required: false
+      revalidate:
+        description: 'Also re-check every indexed asset is still served'
+        type: boolean
+        default: true
+
+  # The three-day link-rot check, on the schedule render.yaml uses.
+  schedule:
+    - cron: '0 3 */3 * *'
+
+# Needed to commit the refreshed index back.
+permissions:
+  contents: write
+
+concurrency:
+  # One audit at a time: two jobs would both rewrite the snapshot and the
+  # second push would clobber the first.
+  group: site-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: capella_dam
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:8
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/capella_dam
+      REDIS_URL: redis://127.0.0.1:6379
+      AEM_PUBLIC_HOST: https://www.capella.edu
+      UI_ORIGIN: http://127.0.0.1:5173
+      NODE_ENV: development
+      # Phase 2/3 stay off — this needs no credentials of any kind.
+      AEM_API_ENABLED: 'false'
+      AEM_INTAKE_ENABLED: 'false'
+      TRANSCRIPTION_ENABLED: 'false'
+      SOCIAL_ENABLED: 'false'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Weights are ~87MB and identical between runs; fetching them from
+      # HuggingFace on every audit is slow and needlessly rude.
+      - name: Cache the embedding model
+        uses: actions/cache@v4
+        with:
+          path: .model-cache
+          key: model-cache-${{ hashFiles('packages/embedding/src/index.ts') }}
+
+      - name: Cache Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('package-lock.json') }}
+
+      - run: npx playwright install --with-deps chromium
+
+      - run: npm run db:generate
+      - run: npm run db:deploy
+
+      # Start from what has already been found, so an audit adds to the index
+      # rather than replacing it.
+      - name: Restore the committed index
+        run: npm run db:restore
+
+      - run: npm run embed:prewarm
+
+      - name: Build
+        run: npx tsc --build packages/types packages/embedding packages/db packages/queue packages/scraper apps/api apps/worker
+
+      - name: Start the worker and API
+        run: |
+          node apps/worker/dist/index.js > worker.log 2>&1 &
+          node apps/api/dist/index.js  > api.log 2>&1 &
+          sleep 5
+
+      - name: Run the audit
+        env:
+          AUDIT_URLS: ${{ github.event.inputs.urls }}
+          AUDIT_NAME: ${{ github.event.inputs.name }}
+        # On the scheduled run there are no inputs; skip straight to revalidation.
+        if: github.event_name == 'workflow_dispatch'
+        run: node scripts/ci-audit.mjs
+
+      - name: Re-check that indexed assets are still served
+        if: github.event_name == 'schedule' || github.event.inputs.revalidate == 'true'
+        run: |
+          curl -fsS -X POST "http://127.0.0.1:3001/api/v1/assets/verification?force=true" > /dev/null
+          echo "Queued. Waiting for it to settle…"
+          for i in $(seq 1 60); do
+            sleep 15
+            body=$(curl -fsS http://127.0.0.1:3001/api/v1/assets/verification)
+            echo "  $body" | head -c 200; echo
+            node -e "
+              const d = JSON.parse(process.argv[1]).data
+              process.exit(d.checked >= d.total ? 0 : 1)
+            " "$body" && break
+          done
+
+      - name: Let the fingerprint and embedding sweeps finish
+        run: |
+          for i in $(seq 1 80); do
+            sleep 15
+            dup=$(curl -fsS "http://127.0.0.1:3001/api/v1/duplicates?threshold=10")
+            idx=$(curl -fsS http://127.0.0.1:3001/api/v1/testimonials/search-index)
+            node -e "
+              const dup = JSON.parse(process.argv[1]).data.coverage
+              const idx = JSON.parse(process.argv[2]).data
+              console.log('  pHash ' + dup.hashedImages + '/' + dup.totalImages +
+                          '  ·  embeddings ' + idx.assets.embedded + '/' + idx.assets.total)
+              // Images the host refuses to serve never get a hash, so this waits
+              // for the sweeps to go quiet rather than for a perfect score.
+              process.exit(idx.assets.embedded >= idx.assets.total ? 0 : 1)
+            " "$dup" "$idx" && break
+          done
+
+      - name: Export the refreshed index
+        run: npm run db:snapshot
+
+      - name: Commit it
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add packages/db/prisma/snapshot
+          if git diff --cached --quiet; then
+            echo "Index unchanged — nothing to commit."
+            exit 0
+          fi
+          git commit -m "Refresh the index from a CI audit
+
+          Ran by ${{ github.event_name }} on $(date -u +%Y-%m-%d).
+          The published static snapshot rebuilds from this."
+          git push
+
+      - name: Worker and API logs
+        if: always()
+        run: |
+          echo '--- worker ---'; tail -80 worker.log || true
+          echo '--- api ---';    tail -40 api.log    || true
