@@ -62,6 +62,7 @@ const testimonials = read('03-testimonial.json.gz')
 const refs = read('05-assetPageReference.json.gz')
 const testimonialRefs = read('06-testimonialPageReference.json.gz')
 const auditJobs = read('00-auditJob.json.gz')
+const auditJobUrls = read('04-auditJobUrl.json.gz')
 
 // Only what a read-only view actually renders. Dropping `embedding` and
 // `rawHtml` is most of the saving.
@@ -111,6 +112,21 @@ const payload = {
     testimonialId: r.testimonialId,
     pageId: r.pageId,
   })),
+  // Per-URL rows, so a job page — including its failures — opens without an
+  // API. The dashboard links straight at these, and without them those links
+  // landed on a 501.
+  auditJobUrls: auditJobUrls.map((u) => ({
+    id: u.id,
+    jobId: u.jobId,
+    url: u.url,
+    status: u.status,
+    error: u.error,
+    assetCount: u.assetCount,
+    testimonialCount: u.testimonialCount,
+    pageTitle: u.pageTitle,
+    isPublished: u.isPublished,
+    processedAt: u.processedAt,
+  })),
   auditJobs: auditJobs.map((j) => ({
     id: j.id,
     name: j.name,
@@ -120,6 +136,7 @@ const payload = {
     failedUrls: j.failedUrls,
     createdAt: j.createdAt,
     completedAt: j.completedAt,
+    errorMessage: j.errorMessage,
   })),
 }
 

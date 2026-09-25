@@ -253,11 +253,19 @@ function NeedsAttention({
 
   const failedUrls = jobs.reduce((total, job) => total + job.failedUrls, 0)
   if (failedUrls > 0) {
-    const job = jobs.find((entry) => entry.failedUrls > 0)
+    // `?failures=1` opens the panel on arrival. Without it this landed on the
+    // job page with the failures collapsed behind a toggle — you clicked a
+    // specific finding and got a page that did not show it.
+    const withFailures = jobs.filter((entry) => entry.failedUrls > 0)
+    const job = withFailures[0]
+    const spread = withFailures.length > 1
+
     items.push({
       label: `${failedUrls} URL${failedUrls === 1 ? '' : 's'} could not be scraped`,
-      detail: 'Across recent audits. Each failure records why.',
-      to: job ? `/audit/${job.id}` : '/audit',
+      detail: spread
+        ? `Across ${withFailures.length} audits. Opens the most recent; each failure records why.`
+        : 'Each failure records why.',
+      to: job ? `/audit/${job.id}?failures=1` : '/audit',
       tone: 'critical',
     })
   }
@@ -267,7 +275,7 @@ function NeedsAttention({
     items.push({
       label: `${failedJobs.length} audit${failedJobs.length === 1 ? '' : 's'} failed outright`,
       detail: 'Something outside the page-by-page handling went wrong.',
-      to: `/audit/${failedJobs[0]?.id ?? ''}`,
+      to: `/audit/${failedJobs[0]?.id ?? ''}?failures=1`,
       tone: 'critical',
     })
   }

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useLocation, useParams } from 'react-router-dom'
+import { useLocation, useParams, useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../components/Layout'
 import { StatusBadge } from '../components/StatusBadge'
 import { EmptyState, ErrorState, Skeleton } from '../components/States'
@@ -30,7 +30,10 @@ export default function AuditJob(): JSX.Element {
   const [page, setPage] = useState(1)
   const [urlStatus, setUrlStatus] = useState<string>('')
   const [liveStatus, setLiveStatus] = useState<string>('')
-  const [showFailures, setShowFailures] = useState(false)
+  // Opened on arrival when linked from "N URLs could not be scraped", so the
+  // thing that was clicked is the thing that is shown.
+  const [searchParams] = useSearchParams()
+  const [showFailures, setShowFailures] = useState(searchParams.get('failures') === '1')
 
   const status = useAuditStatus(jobId)
   const isLive = status.data?.status === 'running' || status.data?.status === 'queued'
@@ -48,6 +51,14 @@ export default function AuditJob(): JSX.Element {
   if (!status.data) return <ErrorState error={new Error('Job not found')} />
 
   const job = status.data
+
+  // An empty table with no filters set is not a filtering problem. Saying "try
+  // clearing the filters above" when there are none, and the real reason is
+  // that every URL failed, sends someone looking in the wrong place.
+  const noFiltersApplied = urlStatus === '' && liveStatus === ''
+  const emptyBecauseEverythingFailed =
+    noFiltersApplied && job.completedUrls === 0 && job.failedUrls > 0
+
   const totalPages = results.data?.meta ? Math.ceil(results.data.meta.total / results.data.meta.limit) : 1
 
   return (
@@ -171,11 +182,19 @@ export default function AuditJob(): JSX.Element {
           <ErrorState error={results.error} onRetry={() => void results.refetch()} />
         ) : !results.data || results.data.rows.length === 0 ? (
           <EmptyState
-            title={isLive ? 'No results yet' : 'No results match these filters'}
+            title={
+              isLive
+                ? 'No results yet'
+                : emptyBecauseEverythingFailed
+                  ? 'Every URL in this audit failed'
+                  : 'No results match these filters'
+            }
             message={
               isLive
                 ? 'The first batch is still being scraped. Results appear here as they land — no need to refresh.'
-                : 'Try clearing the filters above.'
+                : emptyBecauseEverythingFailed
+                  ? 'There are no results to show because nothing was scraped successfully. The reasons are listed below.'
+                  : 'Try clearing the filters above.'
             }
           />
         ) : (

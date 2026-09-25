@@ -534,3 +534,34 @@ Every page carries a banner saying it is a snapshot. That is the same principle
 as pHash coverage and the three-day revalidation: a published snapshot is the
 largest version of the stale-answer problem, because it looks exactly like the
 working tool and the numbers stopped moving on a date nobody can see.
+
+
+## "Needs attention" led to pages that did not show the thing (found 2026-09-25)
+
+Reported as "it leads to nothing", and it was three separate problems wearing
+one coat.
+
+**The failures panel was collapsed on arrival.** "8 URLs could not be scraped"
+linked to the audit's page, where the failures sit behind a `▸ N failed URLs`
+toggle that starts closed. You clicked a specific finding and landed on a page
+that did not show it. The links now carry `?failures=1` and the panel opens on
+arrival.
+
+**The detail line overstated its own link.** It said "across recent audits" but
+linked to the first job with failures. It now counts the jobs involved and says
+which one it is opening when there is more than one.
+
+**In the static build the link 501'd entirely.** The snapshot shipped audit jobs
+but not their per-URL rows, so a job page had no status, no results and no
+failures. Those rows are 141 entries and about 8KB; they are shipped now, and
+job pages work without an API.
+
+Fixing that surfaced a fourth thing. The results table on a job where every URL
+failed said **"No results match these filters — try clearing the filters
+above"** with no filters set. The table was empty because nothing was scraped
+successfully, and blaming filters sends someone looking in the wrong place. It
+now says "Every URL in this audit failed" and points at the reasons below.
+
+All four are the same failure: the interface describing a state it is not
+actually in. Cheap to fix, and each one costs a person real time before they
+work out the message was wrong rather than the data.

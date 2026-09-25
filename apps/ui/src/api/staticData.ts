@@ -68,6 +68,18 @@ interface StaticPayload {
   assetPageReferences: Array<{ assetId: string; pageId: string }>
   testimonialPageReferences: Array<{ testimonialId: string; pageId: string }>
   auditJobs: Array<Record<string, unknown>>
+  auditJobUrls: Array<{
+    id: string
+    jobId: string
+    url: string
+    status: string
+    error: string | null
+    assetCount: number | null
+    testimonialCount: number | null
+    pageTitle: string | null
+    isPublished: boolean | null
+    processedAt: string | null
+  }>
 }
 
 /** The public host is only used to build preview URLs; no request is made to it. */
@@ -248,8 +260,61 @@ export async function staticGet(
     }
   }
 
-  // ── Audits (history only) ─────────────────────────────────────────────────
+  // ── Audits ────────────────────────────────────────────────────────────────
   if (p === '/audit') return { data: db.auditJobs }
+
+  // A job page and its failures, so the dashboard's "N URLs could not be
+  // scraped" leads somewhere rather than to a 501.
+  const jobMatch = /^\/audit\/([^/]+)(\/[a-z]+)?$/.exec(p)
+  if (jobMatch) {
+    const jobId = jobMatch[1] as string
+    const section = jobMatch[2] ?? ''
+    const job = db.auditJobs.find((j) => j['id'] === jobId)
+    if (!job) throw new StaticUnsupportedError('That audit')
+
+    const rows = db.auditJobUrls.filter((u) => u.jobId === jobId)
+
+    if (section === '/status') {
+      const processed = Number(job['completedUrls'] ?? 0) + Number(job['failedUrls'] ?? 0)
+      const total = Number(job['totalUrls'] ?? 0)
+      return {
+        data: {
+          jobId,
+          status: job['status'],
+          totalUrls: total,
+          completedUrls: job['completedUrls'],
+          failedUrls: job['failedUrls'],
+          percentComplete: total === 0 ? 0 : Math.round((processed / total) * 100),
+          estimatedMinutesRemaining: null,
+          startedAt: job['createdAt'],
+          completedAt: job['completedAt'],
+          errorMessage: job['errorMessage'] ?? null,
+        },
+      }
+    }
+
+    if (section === '/failures') {
+      return { data: rows.filter((u) => u.status === 'failed') }
+    }
+
+    if (section === '/results' || section === '') {
+      const done = rows.filter((u) => u.status !== 'failed')
+      const { data, meta } = paginate(done, query)
+      return {
+        data: data.map((u) => ({
+          url: u.url,
+          pageTitle: u.pageTitle,
+          liveStatus: u.isPublished === null ? 'unknown' : u.isPublished ? 'published' : 'draft',
+          urlStatus: u.status,
+          assetCount: u.assetCount ?? 0,
+          testimonialCount: u.testimonialCount ?? 0,
+          processedAt: u.processedAt,
+          error: u.error,
+        })),
+        meta,
+      }
+    }
+  }
 
   // ── Duplicates ────────────────────────────────────────────────────────────
   if (p === '/duplicates') {
