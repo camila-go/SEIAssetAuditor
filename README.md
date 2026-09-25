@@ -124,8 +124,14 @@ Fill in at minimum `DATABASE_URL`, `REDIS_URL`, and `AEM_PUBLIC_HOST`. Every
 `*_ENABLED` flag can stay `false` — Phase 1 audit features need no credentials.
 
 ```bash
-npm run db:migrate && npm run db:seed
+npm run db:migrate && npm run db:restore
 ```
+
+`db:restore` loads a snapshot of the real index committed to this repo — 111
+audited capella.edu pages, 779 assets, 653 fingerprints and 46 testimonials — so
+a fresh clone comes up with actual findings rather than an empty shell. Use
+`npm run db:seed` instead if you want to start empty, and `npm run db:snapshot`
+to refresh the snapshot after new audits.
 
 ```bash
 npm run dev
