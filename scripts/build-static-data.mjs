@@ -76,6 +76,11 @@ const leanAssets = assets.map((a) => ({
   height: a.height,
   phash: a.phash,
   phashAlt: a.phashAlt,
+  // Carried so the published snapshot can explain its own coverage. Without
+  // it the static build reports "655 of 665 fingerprinted" with no way to say
+  // that the other ten never can be, which is exactly the misleading gap the
+  // live tool stopped showing.
+  phashSkipReason: a.phashSkipReason,
   lastSeenAt: a.lastSeenAt,
   lastVerifiedAt: a.lastVerifiedAt,
   lastVerifiedStatus: a.lastVerifiedStatus,

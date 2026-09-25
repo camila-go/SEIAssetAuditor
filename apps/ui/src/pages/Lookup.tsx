@@ -13,6 +13,8 @@ import {
 } from '../api/queries'
 import { formatBytes } from '../lib/format'
 import { AssetPreview } from '../components/AssetPreview'
+import { FingerprintCoverage } from '../components/FingerprintCoverage'
+import { outstandingFingerprints } from '../lib/coverage'
 
 type Mode = 'path' | 'image'
 
@@ -221,9 +223,8 @@ function ImageLookup(): JSX.Element {
   }
 
   const canSearch = (file !== null || imageUrl.trim().length > 0) && !search.isPending
-  const hashed = coverage.data?.hashedImages ?? 0
-  const totalImages = coverage.data?.totalImages ?? 0
-  const lowCoverage = totalImages > 0 && hashed < totalImages
+  // Only hedge the result when fingerprinting would actually change it.
+  const lowCoverage = coverage.data ? outstandingFingerprints(coverage.data) > 0 : false
 
   return (
     <div>
@@ -313,26 +314,21 @@ function ImageLookup(): JSX.Element {
 
       {/* Coverage matters: an unhashed asset cannot match, so "no results"
           would otherwise read as "not in the DAM". */}
-      {coverage.isLoading ? null : lowCoverage ? (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-caution-200 bg-caution-50 px-4 py-3 text-sm text-caution-900">
-          <span>
-            Only {hashed} of {totalImages} indexed images have been fingerprinted. Images that
-            have not been fingerprinted cannot be matched.
-          </span>
-          <button
-            type="button"
-            onClick={() => indexImages.mutate()}
-            disabled={indexImages.isPending}
-            className="rounded-md bg-caution-600 px-3 py-2 text-xs font-medium text-white hover:bg-caution-700 disabled:bg-ink-300"
-          >
-            {indexImages.isPending ? 'Queued…' : 'Fingerprint the rest'}
-          </button>
-        </div>
-      ) : totalImages > 0 ? (
-        <p className="mt-4 text-xs text-ink-500">
-          All {totalImages} indexed images are fingerprinted and searchable.
-        </p>
-      ) : null}
+      {coverage.isLoading || !coverage.data ? null : (
+        <FingerprintCoverage
+          coverage={coverage.data}
+          action={
+            <button
+              type="button"
+              onClick={() => indexImages.mutate()}
+              disabled={indexImages.isPending}
+              className="rounded-md bg-caution-600 px-3 py-2 text-xs font-medium text-white hover:bg-caution-700 disabled:bg-ink-300"
+            >
+              {indexImages.isPending ? 'Queued…' : 'Fingerprint the rest'}
+            </button>
+          }
+        />
+      )}
 
       {indexImages.isSuccess ? (
         <p className="mt-2 text-xs text-ink-600">

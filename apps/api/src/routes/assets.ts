@@ -130,6 +130,20 @@ lookupRouter.get(
 )
 
 /**
+ * GET /api/v1/lookup/image/unhashable — the images that can never be matched.
+ *
+ * The counterpart to coverage. Without it the shortfall is an unexplained
+ * number that reads as unfinished work; with it, each one is a named finding
+ * about the site.
+ */
+lookupRouter.get(
+  '/image/unhashable',
+  asyncRoute(async (_req, res) => {
+    ok(res, await imageSearchService.getUnhashable())
+  }),
+)
+
+/**
  * POST /api/v1/lookup/image — reverse IMAGE search.
  *
  * Accepts either a multipart upload (field `image`) or JSON `{ imageUrl }`.

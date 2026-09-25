@@ -94,13 +94,15 @@ test. None of this needs an AEM account, an API key, or anything from IT.
 | Asset search and browse | 72 real assets across 10 audited pages and 8 DAM brand folders |
 | Reverse lookup by DAM path | Path, public URL and rendition URL all resolve to one asset |
 | Reverse image search | Resize scored 0, WebP 0, JPEG q60 scored 2; unrelated image no match |
-| Image fingerprint index | 62 of 64 images hashed over public HTTP. The shortfall is always the images capella.edu refuses to serve — measured, and reported rather than hidden |
+| Image fingerprint index | **655 of 655 fingerprintable images** hashed over public HTTP. 665 images are indexed; the other ten are classified and named, not left as a gap — capella.edu 403s eight, one path returns a web page instead of the file, one is a 1×1 transparent spacer. Each is retried after 14 days in case the site changes |
 | Duplicate detection | Runs ungated; found one real duplicate pair and reports coverage alongside it |
 | Testimonial scrape, search, page map | Extracted real testimonials with attribution and degree level |
 | **The index keeps itself current** | A completed audit queues the fingerprint and embedding sweeps itself. Verified unattended on two fresh pages: hashing 56/58 → 62/64, embeddings 65/65 → 72/72 |
 | Search that survives typos and paraphrase | `Wbeb` finds Webb; "balancing work and study" finds the quote that never uses those words |
 | CSV export — audits and testimonials | Both return 200 with well-formed, formula-escaped CSV |
 | Published / Draft / Unknown status | Scraped heuristic; reports Unknown honestly rather than guessing |
+| Link-rot check, every three days | All 779 assets re-checked: 770 served, 8 no longer served, **1 soft 404** — answers HTTP 200 with the site's own error page. A status-only check had filed that one as live |
+| Start audits from the published site | The Audit page hands URLs to the GitHub Actions workflow and lists runs live from GitHub, with no backend. Two clicks with no setup — verified in the browser against the real run history. One click with a token: every branch of `api/run-audit.mjs` exercised against a mocked GitHub, **never against a real token** — none exists yet |
 
 > **Duplicate detection is not a Phase 2 feature.** The PRD files it under Phase 2,
 > behind the AEM service account. It does not need one — DAM assets are publicly

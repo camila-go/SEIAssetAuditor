@@ -97,10 +97,60 @@ if (buildStatic) {
   console.log(`[build-ui] Building the live UI against ${apiOrigin}.`)
 }
 
+/**
+ * Which repository's audit workflow the UI should offer to run.
+ *
+ * Worked out here rather than asked for, because every host already knows it
+ * and a deploy that needs one more environment variable set correctly is a
+ * deploy that silently loses the feature when someone forgets. Vercel exposes
+ * the owner and slug; Actions exposes `owner/repo`; the git remote answers
+ * locally. An explicit `VITE_GITHUB_REPOSITORY` still wins, for a fork or a
+ * repository that has been transferred.
+ *
+ * Public information either way — this is a repository name, not a credential.
+ * The token that can actually start a run lives in a serverless function and
+ * never enters the bundle.
+ */
+function detectRepository() {
+  const explicit = process.env.VITE_GITHUB_REPOSITORY?.trim()
+  if (explicit) return explicit
+
+  const { VERCEL_GIT_REPO_OWNER, VERCEL_GIT_REPO_SLUG, GITHUB_REPOSITORY } = process.env
+  if (VERCEL_GIT_REPO_OWNER && VERCEL_GIT_REPO_SLUG) {
+    return `${VERCEL_GIT_REPO_OWNER}/${VERCEL_GIT_REPO_SLUG}`
+  }
+  if (GITHUB_REPOSITORY) return GITHUB_REPOSITORY
+
+  try {
+    const remote = execFileSync('git', ['remote', 'get-url', 'origin'], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+
+    // Both forms: git@github.com:owner/repo.git and https://github.com/owner/repo
+    const match = remote.match(/github\.com[:/]([^/]+)\/(.+?)(?:\.git)?$/)
+    return match ? `${match[1]}/${match[2]}` : ''
+  } catch {
+    return ''
+  }
+}
+
+const repository = detectRepository()
+if (buildStatic) {
+  console.log(
+    repository
+      ? `[build-ui] Audits will be offered via GitHub Actions in ${repository}.`
+      : '[build-ui] No GitHub repository detected — the UI will not offer to run audits.',
+  )
+}
+
 execFileSync('npm', ['run', 'build:ui:workspace'], {
   cwd: root,
   stdio: 'inherit',
-  env: buildStatic ? { ...process.env, VITE_STATIC_DATA: 'true' } : process.env,
+  env: buildStatic
+    ? { ...process.env, VITE_STATIC_DATA: 'true', VITE_GITHUB_REPOSITORY: repository }
+    : process.env,
 })
 
 const built = join(root, OUTPUT)

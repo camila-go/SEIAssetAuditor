@@ -1,6 +1,7 @@
 import type { Job } from 'bullmq'
 import { assetRepo } from '@capella/db'
 import { enqueueRevalidation, type RevalidationJobPayload } from '@capella/queue'
+import { SOFT_404, verdictFor } from '@capella/types'
 import { config } from '../config.js'
 import { logger } from '../lib/logger.js'
 
@@ -43,24 +44,38 @@ export async function processRevalidationJob(job: Job<RevalidationJobPayload>): 
   const checkedAt = new Date()
   let live = 0
   let missing = 0
+  let replacedByPage = 0
   let unreachable = 0
 
   for (const asset of due) {
     const status = await checkStatus(asset.aemPath)
 
-    if (status >= 200 && status < 400) live++
-    else if (status >= 400) {
-      missing++
-      // Worth a line each: this is the actual finding, not noise.
-      logger.warn({ aemPath: asset.aemPath, status }, 'Asset is no longer served')
-    } else unreachable++
+    switch (verdictFor(status)) {
+      case 'live':
+        live++
+        break
+      case 'missing':
+        missing++
+        // Worth a line each: this is the actual finding, not noise.
+        logger.warn({ aemPath: asset.aemPath, status }, 'Asset is no longer served')
+        break
+      case 'replaced-by-page':
+        replacedByPage++
+        logger.warn(
+          { aemPath: asset.aemPath },
+          'Path answers 200 with a web page, not the asset — a soft 404',
+        )
+        break
+      default:
+        unreachable++
+    }
 
     await assetRepo.recordVerification(asset.id, status, checkedAt)
     await sleep(POLITENESS_DELAY_MS)
   }
 
   logger.info(
-    { considered: due.length, live, missing, unreachable },
+    { considered: due.length, live, missing, replacedByPage, unreachable },
     'Asset revalidation batch complete',
   )
 
@@ -94,10 +109,29 @@ async function checkStatus(aemPath: string): Promise<number> {
       headers: { 'User-Agent': config.scraperUserAgent },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
+
+    if (response.ok && servedAPageInstead(response)) return SOFT_404
     return response.status
   } catch {
     return 0
   }
+}
+
+/**
+ * Did the server answer 200 with its own web page rather than the asset?
+ *
+ * `/content/dam/sei/capella/icons/favicons/apple-icon-120x120-precomposed.png`
+ * returns HTTP 200 and 261KB of `text/html`. The asset is gone; the CMS is
+ * answering for it. Reading the status alone recorded that as live, which is
+ * the failure this tool keeps finding in itself — a confident answer built on
+ * an input that carried no signal.
+ *
+ * Restricted to assets that should not be HTML in the first place, so a
+ * genuinely HTML asset in the DAM is not mislabelled.
+ */
+function servedAPageInstead(response: Response): boolean {
+  const contentType = response.headers.get('content-type') ?? ''
+  return contentType.startsWith('text/html')
 }
 
 function sleep(ms: number): Promise<void> {

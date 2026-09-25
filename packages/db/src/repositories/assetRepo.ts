@@ -1,4 +1,5 @@
 import type { Asset, AssetType, Prisma } from '@prisma/client'
+import { RETRY_SKIP_AFTER_DAYS, SOFT_404, type PhashSkipReason } from '@capella/types'
 import { prisma, type TxClient } from '../client.js'
 import { parseSearchTerms, termMatchesAnyColumn } from '../search.js'
 import { fuseRankings, semanticAssetSearch, type FusedHit, type RankedList } from '../semantic.js'
@@ -163,10 +164,24 @@ export async function countReferences(assetId: string): Promise<number> {
 
 /** Assets that still need a pHash computed — fed to the pHash background job. */
 export async function findNeedingPhash(limit: number): Promise<Asset[]> {
+  const retryBefore = new Date(Date.now() - RETRY_SKIP_AFTER_DAYS * 24 * 60 * 60 * 1000)
+
   return prisma.asset.findMany({
     where: {
       assetType: 'image',
       deletedAt: null,
+      // Images already tried and found impossible are left alone until the
+      // retry window passes. Ten of Capella's images can never be hashed — the
+      // host 403s eight of them — and before this they were re-downloaded on
+      // every single sweep, forever, against a site we do not own.
+      //
+      // The window rather than a permanent exclusion: a 403 is what the server
+      // said that day, not a property of the image. If someone fixes the
+      // permission, the sweep picks it up without being told.
+      OR: [
+        { phashAttemptedAt: null },
+        { phashAttemptedAt: { lt: retryBefore } },
+      ],
       // BOTH must be null, matching `countHashedImages`. Selecting on `phash`
       // alone re-selected every white-on-transparent logo on every sweep: those
       // rows have `phash = null` *by design*, because flattening them onto white
@@ -190,7 +205,67 @@ export async function setPhash(
   phash: string | null,
   phashAlt: string | null = null,
 ): Promise<void> {
-  await prisma.asset.update({ where: { id }, data: { phash, phashAlt } })
+  await prisma.asset.update({
+    where: { id },
+    // Clears any previous skip: this image hashed, so whatever stopped it last
+    // time no longer applies.
+    data: { phash, phashAlt, phashSkipReason: null, phashAttemptedAt: new Date() },
+  })
+}
+
+/**
+ * Record that hashing was attempted and could not produce one.
+ *
+ * The attempt timestamp is the load-bearing half. The reason is what the UI
+ * shows; the timestamp is what stops the sweep retrying it tomorrow.
+ */
+export async function setPhashSkipped(id: string, reason: PhashSkipReason): Promise<void> {
+  await prisma.asset.update({
+    where: { id },
+    data: { phashSkipReason: reason, phashAttemptedAt: new Date() },
+  })
+}
+
+/**
+ * Images that have been tried and cannot be hashed, with the reason.
+ *
+ * Fed to the coverage panel so "655 of 665" can be stated as "655 of 655
+ * hashable, 10 excluded" and each exclusion named. An unexplained shortfall
+ * reads as unfinished work; a listed one reads as a finding about the site.
+ */
+export async function findUnhashableImages(): Promise<
+  Array<Pick<Asset, 'id' | 'aemPath' | 'filename' | 'phashSkipReason' | 'phashAttemptedAt'>>
+> {
+  return prisma.asset.findMany({
+    where: {
+      assetType: 'image',
+      deletedAt: null,
+      phash: null,
+      phashAlt: null,
+      phashSkipReason: { not: null },
+    },
+    select: {
+      id: true,
+      aemPath: true,
+      filename: true,
+      phashSkipReason: true,
+      phashAttemptedAt: true,
+    },
+    orderBy: { aemPath: 'asc' },
+  })
+}
+
+/** How many images have been tried and found impossible to hash. */
+export async function countUnhashableImages(): Promise<number> {
+  return prisma.asset.count({
+    where: {
+      assetType: 'image',
+      deletedAt: null,
+      phash: null,
+      phashAlt: null,
+      phashSkipReason: { not: null },
+    },
+  })
 }
 
 /** All image assets with a pHash — the duplicate detector compares these pairwise. */
@@ -329,6 +404,15 @@ export interface VerificationSummary {
   live: number
   /** Checked and NOT served — the link rot this exists to find. */
   missing: number
+  /**
+   * Answered 200, but with a web page instead of the file — a soft 404.
+   *
+   * Counted apart from `missing` because the server is not admitting the file
+   * is gone, and apart from `live` because it plainly is. Folding it into
+   * `live`, which reading the status alone does, hides real link rot behind a
+   * 200.
+   */
+  replacedByPage: number
   /** Oldest check still on record, so the UI can say how current this is. */
   oldestCheck: Date | null
   newestCheck: Date | null
@@ -344,11 +428,12 @@ export interface VerificationSummary {
 export async function getVerificationSummary(): Promise<VerificationSummary> {
   const base = { deletedAt: null } as const
 
-  const [total, checked, live, missing, oldest, newest] = await Promise.all([
+  const [total, checked, live, missing, replacedByPage, oldest, newest] = await Promise.all([
     prisma.asset.count({ where: base }),
     prisma.asset.count({ where: { ...base, lastVerifiedAt: { not: null } } }),
     prisma.asset.count({ where: { ...base, lastVerifiedStatus: { gte: 200, lt: 400 } } }),
     prisma.asset.count({ where: { ...base, lastVerifiedStatus: { gte: 400 } } }),
+    prisma.asset.count({ where: { ...base, lastVerifiedStatus: SOFT_404 } }),
     prisma.asset.findFirst({
       where: { ...base, lastVerifiedAt: { not: null } },
       orderBy: { lastVerifiedAt: 'asc' },
@@ -366,15 +451,25 @@ export async function getVerificationSummary(): Promise<VerificationSummary> {
     checked,
     live,
     missing,
+    replacedByPage,
     oldestCheck: oldest?.lastVerifiedAt ?? null,
     newestCheck: newest?.lastVerifiedAt ?? null,
   }
 }
 
-/** Assets confirmed gone, for the maintenance view. */
+/**
+ * Assets confirmed gone, for the maintenance view.
+ *
+ * Includes soft 404s. A path answering 200 with the site's own error page is
+ * exactly as broken as one answering 404, and leaving it out of the list of
+ * things to fix is the whole reason it went unnoticed.
+ */
 export async function findMissing(limit = 200): Promise<Asset[]> {
   return prisma.asset.findMany({
-    where: { deletedAt: null, lastVerifiedStatus: { gte: 400 } },
+    where: {
+      deletedAt: null,
+      OR: [{ lastVerifiedStatus: { gte: 400 } }, { lastVerifiedStatus: SOFT_404 }],
+    },
     orderBy: { lastVerifiedAt: 'desc' },
     take: limit,
   })

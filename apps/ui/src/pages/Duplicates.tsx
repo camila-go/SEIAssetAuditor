@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { PageHeader } from '../components/Layout'
 import { EmptyState, ErrorState, Skeleton } from '../components/States'
 import { useDuplicates } from '../api/queries'
+import { outstandingFingerprints } from '../lib/coverage'
 import { formatBytes } from '../lib/format'
 
 /**
@@ -51,8 +52,8 @@ export default function Duplicates(): JSX.Element {
         <EmptyState
           title="No duplicates found"
           message={
-            duplicates.data && duplicates.data.coverage.hashedImages < duplicates.data.coverage.totalImages
-              ? `Only ${duplicates.data.coverage.hashedImages} of ${duplicates.data.coverage.totalImages} indexed images have been fingerprinted, so this is not conclusive. Fingerprint the rest from Reverse lookup → By image.`
+            duplicates.data && outstandingFingerprints(duplicates.data.coverage) > 0
+              ? `${duplicates.data.coverage.hashedImages} of ${duplicates.data.coverage.totalImages - (duplicates.data.coverage.unhashableImages ?? 0)} images have been fingerprinted, so this is not conclusive. Fingerprint the rest from Reverse lookup → By image.`
               : `No two indexed images are within a Hamming distance of ${threshold}. Try raising the sensitivity, or run more audits to index more assets.`
           }
         />

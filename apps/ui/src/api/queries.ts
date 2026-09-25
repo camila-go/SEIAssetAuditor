@@ -212,6 +212,30 @@ export function useReverseLookup(path: string, enabled: boolean): UseQueryResult
 export interface ImageSearchCoverage {
   totalImages: number
   hashedImages: number
+  /**
+   * Images tried and found impossible to fingerprint. Optional because a
+   * snapshot built before this existed does not carry the field, and a missing
+   * count must read as "none known", not as a crash.
+   */
+  unhashableImages?: number
+}
+
+export interface UnhashableImage {
+  aemPath: string
+  filename: string
+  reason: string
+  label: string
+}
+
+export function useUnhashableImages(
+  enabled: boolean,
+): UseQueryResult<UnhashableImage[]> {
+  return useQuery({
+    queryKey: ['unhashable-images'],
+    queryFn: async () => (await api.get<UnhashableImage[]>('/lookup/image/unhashable')).data,
+    enabled,
+    retry: false,
+  })
 }
 
 export function useDuplicates(

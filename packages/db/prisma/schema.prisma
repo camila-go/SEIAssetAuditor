@@ -101,6 +101,18 @@ model Asset {
   /// channel — a transparent logo exported to JPEG can land on either
   /// background, and the two hashes are otherwise ~108/256 bits apart.
   phashAlt   String?   @map("phash_alt")
+  /// Why this image has no hash, when it has been tried and cannot get one.
+  /// See `PhashSkipReason`.
+  ///
+  /// Without this, "no hash" meant two different things — never attempted, and
+  /// attempted and impossible — and the tool could not tell them apart. Every
+  /// sweep re-downloaded the same ten images the host refuses to serve, and
+  /// coverage reported 655/665 with no way to say that the missing ten are not
+  /// missing work. A null here with null hashes means genuinely not yet tried.
+  phashSkipReason    String?   @map("phash_skip_reason")
+  /// When hashing was last attempted, successful or not. Drives the retry
+  /// window: a skip is a fact about today's server, not a permanent verdict.
+  phashAttemptedAt   DateTime? @map("phash_attempted_at")
   isIndexed  Boolean   @default(false) @map("is_indexed")
 
   /// Link-rot tracking, refreshed on a schedule rather than only when a page

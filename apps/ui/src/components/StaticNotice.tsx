@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { IS_STATIC } from '../api/client'
 
 /**
@@ -15,10 +16,14 @@ export function StaticNotice(): JSX.Element | null {
   return (
     <div className="border-b border-caution-200 bg-caution-50">
       <div className="mx-auto max-w-7xl px-4 py-2 text-xs leading-relaxed text-caution-900 sm:px-6">
-        <strong className="font-semibold">Read-only snapshot.</strong> Real findings from a real
-        audit of capella.edu — browsing, search, duplicates and the page maps all work. Running a
-        new audit needs the backend, which is not deployed here. Search is term matching only;
-        meaning-based search needs the embedding model.
+        <strong className="font-semibold">Published snapshot.</strong> Real findings from a real
+        audit of capella.edu — browsing, search, duplicates and the page maps all work. New audits
+        run in GitHub Actions and are started from{' '}
+        <Link to="/audit" className="underline">
+          Audit
+        </Link>
+        ; findings appear here once the run finishes and the site rebuilds. Search is term matching
+        only — meaning-based search needs the embedding model, which needs the backend.
       </div>
     </div>
   )

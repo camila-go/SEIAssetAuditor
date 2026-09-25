@@ -13,8 +13,10 @@ index: where is this asset used, which images are duplicates, what testimonials
 exist, what has disappeared from the site.
 
 Built to PRD v1.5 (`PRD.md`). It runs, it has been pointed at the live site, and
-**a snapshot of its real findings is committed to this repo** — 111 audited
-pages, 779 assets, 653 fingerprints, 46 testimonials.
+**a snapshot of its real findings is committed to this repo** — 112 audited
+pages, 779 assets, 46 testimonials, and every image that can be fingerprinted
+fingerprinted (655 of 665; the other ten the site will not serve, or are a
+single flat colour, and the tool names each one).
 
 ## Start here, in this order
 
@@ -140,18 +142,25 @@ Actions closes it.
 
 `.github/workflows/audit.yml` runs the **real** tool — Chromium, Postgres,
 Redis, the worker — inside an Actions job, then commits the refreshed index
-back. The static site rebuilds on that push. Actions → **Run an audit** → **Run
-workflow**, paste URLs, done. It also runs the three-day link-rot check on a
-schedule.
+back. The static site rebuilds on that push. It also runs the three-day
+link-rot check on a schedule.
+
+**Audits are started from the tool's own Audit page.** Paste URLs or upload a
+CSV as normal; the page hands them to the workflow and lists recent runs live
+from GitHub. Out of the box that is two clicks (copy the URLs, confirm on
+GitHub). With a token in a Vercel serverless function it is one — see
+[the free path in the runbook](docs/deploy-runbook.md#the-free-path--no-render-no-cost).
+Every run also writes a summary to its GitHub page: what was scraped, what was
+found, and whether any indexed asset has stopped being served.
 
 This repository is public, and **public repositories get unlimited Actions
 minutes**, so it costs nothing. Nothing is always-on; the stack exists for the
 minutes an audit takes and then goes away.
 
-What you give up against Option B: audits are started from the Actions tab
-rather than the tool's own form, and results appear after the job finishes
-rather than streaming in. For a tool that is run occasionally against a set of
-URLs, that is a small loss.
+What you give up against Option B: results appear after the run finishes and
+the site rebuilds — a few minutes — rather than streaming in page by page, and
+a sitemap has to be expanded into URLs first. For a tool that is run
+occasionally against a set of URLs, that is a small loss.
 
 ### What is not viable
 

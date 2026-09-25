@@ -1,5 +1,9 @@
 name: Run an audit
 
+# What the run is called in the Actions list. Without this every entry reads
+# "Run an audit" and the only way to tell them apart is to open each one.
+run-name: "${{ github.event_name == 'schedule' && 'Scheduled link check' || (inputs.name != '' && inputs.name || format('Audit started by @{0}', github.actor)) }}"
+
 # Runs the real tool — Chromium, Postgres, Redis, the worker — inside a GitHub
 # Actions job, and commits the resulting index back to the repo. The static site
 # rebuilds on that push, so the published snapshot gains the new findings.
@@ -19,7 +23,7 @@ on:
         required: false
         default: |
           https://www.capella.edu/
-          https://www.capella.edu/about/
+          https://www.capella.edu/capella-experience/about/
           https://www.capella.edu/online-degrees/
       name:
         description: 'Audit name (optional)'
@@ -177,6 +181,16 @@ jobs:
               process.exit(idx.assets.embedded >= idx.assets.total ? 0 : 1)
             " "$dup" "$idx" && break
           done
+
+      # A scheduled run does no audit, so without this its run page is blank and
+      # the only way to learn whether anything rotted is to read the raw logs.
+      - name: Summarise the index
+        if: always()
+        run: |
+          verification=$(curl -fsS http://127.0.0.1:3001/api/v1/assets/verification || echo '{}')
+          coverage=$(curl -fsS http://127.0.0.1:3001/api/v1/lookup/image/coverage || echo '{}')
+          unhashable=$(curl -fsS http://127.0.0.1:3001/api/v1/lookup/image/unhashable || echo '{}')
+          node scripts/ci-index-summary.mjs "$verification" "$coverage" "$unhashable"
 
       - name: Export the refreshed index
         run: npm run db:snapshot

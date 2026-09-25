@@ -2,7 +2,13 @@ import { isIP } from 'node:net'
 import { lookup as dnsLookup } from 'node:dns/promises'
 import { assetRepo, pageRepo } from '@capella/db'
 import { bestDistance, computePhashVariants } from '@capella/scraper'
-import { AppError, ERROR_CODES, type PageAppearance } from '@capella/types'
+import {
+  AppError,
+  ERROR_CODES,
+  PHASH_SKIP_LABELS,
+  type PageAppearance,
+  type PhashSkipReason,
+} from '@capella/types'
 import { publicAssetUrl } from '../config.js'
 import { toLiveStatus } from './auditService.js'
 import { logger } from '../lib/logger.js'
@@ -75,6 +81,15 @@ export interface ImageSearchCoverage {
   totalImages: number
   /** Image assets that have a pHash and can therefore be matched. */
   hashedImages: number
+  /**
+   * Images tried and found impossible to hash — the host refuses them, or they
+   * are a single flat colour.
+   *
+   * Reported separately so the UI can say "everything that can be fingerprinted
+   * has been" instead of showing a permanent shortfall. Ten of Capella's 665
+   * images are in here, and no amount of running the sweep will ever move them.
+   */
+  unhashableImages: number
 }
 
 export interface ImageSearchResult {
@@ -184,11 +199,34 @@ export async function searchByImage(
  * yet", which is a completely different answer from "not in the DAM".
  */
 export async function getCoverage(): Promise<ImageSearchCoverage> {
-  const [totalImages, hashedImages] = await Promise.all([
+  const [totalImages, hashedImages, unhashableImages] = await Promise.all([
     assetRepo.countImages(),
     assetRepo.countHashedImages(),
+    assetRepo.countUnhashableImages(),
   ])
-  return { totalImages, hashedImages }
+  return { totalImages, hashedImages, unhashableImages }
+}
+
+/**
+ * The images that will never get a hash, and why.
+ *
+ * Shown behind the coverage figure so the gap is a list of named findings about
+ * the site rather than an unexplained number.
+ */
+export async function getUnhashable(): Promise<
+  Array<{ aemPath: string; filename: string; reason: string; label: string }>
+> {
+  const rows = await assetRepo.findUnhashableImages()
+
+  return rows.map((row) => {
+    const reason = (row.phashSkipReason ?? 'decode_failed') as PhashSkipReason
+    return {
+      aemPath: row.aemPath,
+      filename: row.filename,
+      reason,
+      label: PHASH_SKIP_LABELS[reason] ?? reason,
+    }
+  })
 }
 
 /**

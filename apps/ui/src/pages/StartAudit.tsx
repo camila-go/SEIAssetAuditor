@@ -1,9 +1,11 @@
-import { useState, type DragEvent, type FormEvent } from 'react'
+import { useEffect, useState, type DragEvent, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '../components/Layout'
 import { ErrorState, PhaseNotice } from '../components/States'
 import { useCreateAudit } from '../api/queries'
 import { useAuditStore } from '../store/auditStore'
+import { RunViaActions } from '../components/RunViaActions'
+import { IS_STATIC } from '../api/client'
 import { normalizeUrl } from '@capella/types'
 
 type InputMode = 'paste' | 'csv' | 'sitemap'
@@ -36,6 +38,45 @@ export default function StartAudit(): JSX.Element {
     .filter((line) => line.length > 0 && !line.startsWith('#'))
   const urlCount = parsedUrls.filter((line) => normalizeUrl(line) !== null).length
   const unreadableCount = parsedUrls.length - urlCount
+
+  // ── Handing URLs to the Actions workflow ──────────────────────────────────
+  //
+  // Only needed with no backend. The workflow takes a list of URLs and nothing
+  // else, so a CSV has to be read here in the browser rather than posted to an
+  // API that does not exist. A sitemap cannot be: expanding one means fetching
+  // it, and the page has no server to fetch it through.
+  const [csvUrls, setCsvUrls] = useState<string[]>([])
+
+  useEffect(() => {
+    if (!IS_STATIC || mode !== 'csv' || file === null) {
+      setCsvUrls([])
+      return
+    }
+
+    let cancelled = false
+    void file.text().then((text) => {
+      if (cancelled) return
+      setCsvUrls(
+        text
+          .split(/\r?\n/)
+          // First column only, matching what the API does with an upload.
+          .map((line) => (line.split(',')[0] ?? '').trim())
+          .filter((line) => line.length > 0 && !line.startsWith('#'))
+          .filter((line) => normalizeUrl(line) !== null),
+      )
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [mode, file])
+
+  const dispatchableUrls =
+    mode === 'csv'
+      ? csvUrls
+      : mode === 'paste'
+        ? parsedUrls.filter((line) => normalizeUrl(line) !== null)
+        : []
 
   const canSubmit =
     !createAudit.isPending &&
@@ -134,7 +175,7 @@ export default function StartAudit(): JSX.Element {
                   onChange={(event) => setUrls(event.target.value)}
                   rows={12}
                   spellCheck={false}
-                  placeholder={'https://www.capella.edu/online-degrees/\nhttps://www.capella.edu/about/'}
+                  placeholder={'https://www.capella.edu/online-degrees/\nhttps://www.capella.edu/capella-experience/about/'}
                   className="mt-1 w-full rounded-md border border-ink-300 px-3 py-2 font-mono text-xs"
                 />
                 <p className="mt-1 text-xs text-ink-500">
@@ -205,15 +246,40 @@ export default function StartAudit(): JSX.Element {
 
         {createAudit.isError ? <ErrorState error={createAudit.error} /> : null}
 
-        <button
-          type="submit"
-          disabled={!canSubmit}
-          data-testid="audit-submit"
-          className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-ink-300"
-        >
-          {createAudit.isPending ? 'Queueing…' : 'Start audit'}
-        </button>
+        {/* With no backend the submit button cannot do anything, so it is
+            replaced rather than left to fail. The URLs typed above are handed
+            to the Actions workflow, which runs the real scraper. */}
+        {IS_STATIC ? null : (
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            data-testid="audit-submit"
+            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-ink-300"
+          >
+            {createAudit.isPending ? 'Queueing…' : 'Start audit'}
+          </button>
+        )}
       </form>
+
+      {IS_STATIC ? (
+        <div className="mt-6">
+          <RunViaActions
+            urls={dispatchableUrls}
+            name={name.trim()}
+            disabled={dispatchableUrls.length === 0}
+          />
+          {mode === 'sitemap' ? (
+            <p className="mt-2 text-xs text-ink-500">
+              A sitemap has to be fetched and expanded before the run starts, which needs the
+              backend. Paste the URLs instead, or start the run from GitHub where the workflow
+              can read the sitemap itself.
+            </p>
+          ) : null}
+          {mode === 'csv' && file !== null && csvUrls.length === 0 ? (
+            <p className="mt-2 text-xs text-ink-500">Reading the file…</p>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }

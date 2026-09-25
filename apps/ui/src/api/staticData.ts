@@ -1,4 +1,9 @@
-import { normalizeAssetPath, parseSearchTerms } from '@capella/types'
+import {
+  PHASH_SKIP_LABELS,
+  normalizeAssetPath,
+  parseSearchTerms,
+  type PhashSkipReason,
+} from '@capella/types'
 
 /**
  * Serve the UI from a snapshot instead of an API.
@@ -35,6 +40,8 @@ interface StaticAsset {
   height: number | null
   phash: string | null
   phashAlt: string | null
+  /** Absent in snapshots built before the tool recorded this. */
+  phashSkipReason?: string | null
   lastSeenAt: string | null
   lastVerifiedAt: string | null
   lastVerifiedStatus: number | null
@@ -406,16 +413,24 @@ export async function staticGet(
 
   // ── Duplicates ────────────────────────────────────────────────────────────
   if (p === '/duplicates') {
+    return { data: { groups: groupDuplicates(db.assets), coverage: imageCoverage(db) } }
+  }
+
+  if (p === '/lookup/image/coverage') {
+    return { data: imageCoverage(db) }
+  }
+
+  if (p === '/lookup/image/unhashable') {
     return {
-      data: {
-        groups: groupDuplicates(db.assets),
-        coverage: {
-          totalImages: db.assets.filter((a) => a.assetType === 'image').length,
-          hashedImages: db.assets.filter(
-            (a) => a.assetType === 'image' && (a.phash !== null || a.phashAlt !== null),
-          ).length,
-        },
-      },
+      data: db.assets
+        .filter(isUnhashableImage)
+        .map((a) => ({
+          aemPath: a.aemPath,
+          filename: a.filename,
+          reason: a.phashSkipReason,
+          label: PHASH_SKIP_LABELS[a.phashSkipReason as PhashSkipReason] ?? a.phashSkipReason,
+        }))
+        .sort((a, b) => a.aemPath.localeCompare(b.aemPath)),
     }
   }
 
@@ -434,6 +449,35 @@ export function staticPost(): never {
  * live tool would. Quadratic, but over a few hundred images in a browser that
  * is milliseconds.
  */
+/** An image tried and found impossible to fingerprint — see PHASH_SKIP_REASONS. */
+function isUnhashableImage(asset: StaticAsset): boolean {
+  return (
+    asset.assetType === 'image' &&
+    asset.phash === null &&
+    asset.phashAlt === null &&
+    Boolean(asset.phashSkipReason)
+  )
+}
+
+/**
+ * The same three numbers the live API reports, computed from the snapshot.
+ *
+ * `unhashableImages` is what lets the static site say "everything that can be
+ * fingerprinted has been" rather than showing a shortfall it cannot explain.
+ */
+function imageCoverage(db: StaticPayload): {
+  totalImages: number
+  hashedImages: number
+  unhashableImages: number
+} {
+  const images = db.assets.filter((a) => a.assetType === 'image')
+  return {
+    totalImages: images.length,
+    hashedImages: images.filter((a) => a.phash !== null || a.phashAlt !== null).length,
+    unhashableImages: images.filter(isUnhashableImage).length,
+  }
+}
+
 function groupDuplicates(assets: StaticAsset[]): Array<Record<string, unknown>> {
   const images = assets.filter((a) => a.assetType === 'image' && (a.phash ?? a.phashAlt))
   const seen = new Set<string>()

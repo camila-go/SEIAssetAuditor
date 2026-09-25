@@ -21,9 +21,16 @@
  * actually referenced, so the scraper was silently discarding most of each
  * page. Measured on three pages (count of matched path roots in the HTML):
  *
- *   capella.edu/           vc/logo 44 · sei/capella 24 · capella/logos 4 · sei/strayer 3
- *   capella.edu/about/     sei/capella 37 · sei/global-logos 28 · sei/strayer 21 · capella/PDF 4
- *   capella.edu/online-degrees/   capella/FlexPath 39 · vc/logo 33 · sei/capella 7
+ *   capella.edu/                        vc/logo 44 · sei/capella 24 · capella/logos 4
+ *   capella.edu/capella-experience/about/  vc/logo 45 · sei/capella 8 · capella/PDF 6
+ *   capella.edu/online-degrees/         capella/FlexPath 39 · vc/logo 33 · sei/capella 7
+ *
+ * The middle row used to be `capella.edu/about/`, which does not exist — the
+ * site answers it with a 404 page, so those counts were measured against error
+ * chrome rather than a page. Re-measured against the real About page, which is
+ * nested under `/capella-experience/`. The conclusion is unchanged and was
+ * never resting on that row, but a measurement taken from a 404 is exactly the
+ * kind of confident-looking input this tool exists to catch.
  *
  * Capella has clearly been migrated into the shared SEI DAM, and the site also
  * pulls sibling-brand and global chrome. An audit tool that answers "where is
