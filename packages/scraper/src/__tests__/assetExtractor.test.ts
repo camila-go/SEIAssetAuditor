@@ -103,6 +103,31 @@ describe('normalizeAssetPath', () => {
     ).toBe('/content/dam/capella/images/hero.jpg')
   })
 
+  /**
+   * Regression: the colon spelling is what this code was written for, and the
+   * underscore spelling is the only one capella.edu emits. 54 of 779 indexed
+   * assets carried `_jcr_content` and none carried `jcr:content`, so renditions
+   * of 18 images were indexed as 54 separate assets — and duplicate detection
+   * then reported each image as a duplicate of itself.
+   */
+  it('collapses the _jcr_content spelling the live site actually uses', () => {
+    expect(
+      normalizeAssetPath(
+        '/content/dam/vc/logo/accreditation/CAEP-Accredited-Shield-255x180.png/_jcr_content/renditions/rendition-png-480-300.png',
+      ),
+    ).toBe('/content/dam/vc/logo/accreditation/CAEP-Accredited-Shield-255x180.png')
+  })
+
+  it('collapses every rendition of one image to the same path', () => {
+    const base = '/content/dam/vc/hero/icons/icon_0084_tuitionfees2.png'
+    const renditions = [
+      `${base}/_jcr_content/renditions/rendition-png-319-200.png`,
+      `${base}/_jcr_content/renditions/rendition-png-480-300.png`,
+      `${base}/_jcr_content/renditions/cq5dam.web.1280.1280.png`,
+    ]
+    expect(new Set(renditions.map(normalizeAssetPath))).toEqual(new Set([base]))
+  })
+
   it('collapses an AEM transform URL to the underlying asset', () => {
     expect(
       normalizeAssetPath('/content/dam/capella/images/hero.jpg.transform/thumb/image.jpg'),

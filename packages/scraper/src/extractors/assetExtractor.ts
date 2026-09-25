@@ -132,8 +132,16 @@ export function normalizeAssetPath(raw: string): string | null {
   // the same underlying asset, so collapse them to the original.
   //   /content/dam/x.jpg/jcr:content/renditions/original  -> /content/dam/x.jpg
   //   /content/dam/x.jpg.transform/thumb/image.jpg        -> /content/dam/x.jpg
-  const jcrIndex = value.indexOf('/jcr:content/')
-  if (jcrIndex > 0) value = value.slice(0, jcrIndex)
+  // Both spellings. The colon form is what this was written for; the underscore
+  // form is the only one capella.edu actually emits. Of 779 indexed assets, 54
+  // carried `_jcr_content` and none carried `jcr:content` — so this collapsing
+  // had never once fired in production, and renditions of 18 images were
+  // indexed as 54 separate assets. Duplicate detection then correctly reported
+  // each image as a duplicate of itself.
+  for (const marker of ['/jcr:content/', '/_jcr_content/']) {
+    const index = value.indexOf(marker)
+    if (index > 0) value = value.slice(0, index)
+  }
 
   const transformIndex = value.indexOf('.transform/')
   if (transformIndex > 0) value = value.slice(0, transformIndex)

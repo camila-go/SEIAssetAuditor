@@ -1,4 +1,5 @@
 import type { ApiErrorBody, PaginationMeta } from '@capella/types'
+import { StaticUnsupportedError, staticGet, staticPost } from './staticData'
 
 /**
  * Thin fetch wrapper enforcing the `{ data, error, meta }` contract.
@@ -28,6 +29,15 @@ export function apiUrl(path: string): string {
 }
 
 const BASE_URL = `${API_ORIGIN}/api/v1`
+
+/**
+ * Read-only mode, served from a committed snapshot instead of an API.
+ *
+ * Set at build time so a static host can publish the tool with no backend at
+ * all — see scripts/build-static-data.mjs for why that is the only free,
+ * always-on option for this particular tool.
+ */
+export const IS_STATIC = import.meta.env?.VITE_STATIC_DATA === 'true'
 
 export class ApiError extends Error {
   readonly code: string
@@ -104,6 +114,21 @@ async function parse<T>(response: Response): Promise<Envelope<T>> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<{ data: T; meta?: PaginationMeta }> {
+  if (IS_STATIC) {
+    try {
+      const result =
+        init?.method === 'POST' ? staticPost() : await staticGet(path)
+      return result as { data: T; meta?: PaginationMeta }
+    } catch (error) {
+      // Surfaced as a 501 so the UI reuses its existing "not configured"
+      // notice rather than rendering this as a failure.
+      if (error instanceof StaticUnsupportedError) {
+        throw new ApiError(error.status, { code: error.code, message: error.message } as ApiErrorBody)
+      }
+      throw error
+    }
+  }
+
   const response = await fetch(`${BASE_URL}${path}`, {
     ...init,
     headers: {

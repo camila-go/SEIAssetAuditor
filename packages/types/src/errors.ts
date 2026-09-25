@@ -53,6 +53,9 @@ export const ERROR_CODES = {
    * Both mean the interface is deployed and the backend is not.
    */
   API_NOT_REACHABLE: 'API_NOT_REACHABLE',
+
+  /** Read-only snapshot build: the feature needs the live API. */
+  STATIC_SNAPSHOT: 'STATIC_SNAPSHOT',
 } as const
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES]
@@ -96,6 +99,7 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   INTERNAL_ERROR: 500,
   // Client-side only; the status is whatever the static host gave us.
   API_NOT_REACHABLE: 503,
+  STATIC_SNAPSHOT: 501,
 }
 
 /**

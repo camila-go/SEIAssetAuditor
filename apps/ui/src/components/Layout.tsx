@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { StaticNotice } from './StaticNotice'
 
 /**
  * Navigation, grouped into areas.
@@ -66,6 +67,7 @@ export function Layout(): JSX.Element {
 
   return (
     <div className="min-h-screen bg-ink-50">
+      <StaticNotice />
       <header className="border-b border-ink-200 bg-white">
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
           <div className="flex h-14 items-center justify-between">
@@ -176,6 +178,7 @@ export function Layout(): JSX.Element {
 export function PublicLayout(): JSX.Element {
   return (
     <div className="min-h-screen bg-ink-50">
+      <StaticNotice />
       <header className="border-b border-ink-200 bg-white">
         <div className="mx-auto flex h-14 max-w-3xl items-center px-4 sm:px-6">
           <span className="text-sm font-semibold text-ink-900">Capella Video Submission</span>

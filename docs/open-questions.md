@@ -478,3 +478,59 @@ Two distinctions the implementation keeps deliberately:
 `removeOnFail: true` here too, for the same reason as the pHash queue — a
 retained failed id would permanently block a schedule whose entire purpose is to
 run unattended.
+
+
+## Renditions were indexed as separate assets (found 2026-09-25)
+
+Spotted in the duplicates view of the static build: groups like
+
+```
+CAEP-Accredited-Shield-255x180.png/_jcr_content/renditions/rendition-png-480-300.png
+CAEP-Accredited-Shield-255x180.png/_jcr_content/renditions/rendition-png-319-200.png
+CAEP-Accredited-Shield-255x180.png/_jcr_content/renditions/cq5dam.web.1280.1280.png
+```
+
+Three rows for one image. `normalizeAssetPath` collapses a rendition URL back to
+its underlying asset, but only recognised `/jcr:content/`. AEM also emits
+`/_jcr_content/`, and **that is the only spelling capella.edu uses**: of 779
+indexed assets, 54 carried the underscore form and **zero** carried the colon
+form. The collapsing logic had never fired in production — it was written for a
+shape the real site does not produce.
+
+Effect: 54 rows that are really 18 images, inflating the asset count by 36 and
+making duplicate detection correctly report each image as a duplicate of itself.
+
+This is the fourth instance of the same pattern: **code written against the
+spec's idea of the site rather than the site.** The others were the DAM root,
+the testimonial selectors and `networkidle`. Worth treating as the default
+suspicion whenever a rule "handles" something and the handling never seems to
+matter.
+
+Fixed by collapsing both spellings. Existing rows stay inflated until the next
+audit re-normalises them — a re-crawl, not a migration, because the index is
+derived data.
+
+## Why a static snapshot mode exists (added 2026-09-25)
+
+The machine this was built on is being decommissioned and there is no hosting
+budget. Those two facts together rule out every option that was on the table:
+the tool needs a persistent worker driving headless Chromium plus a Postgres and
+a Redis that survive restarts, and no free tier provides any of the three —
+checked against Render's own documentation rather than assumed.
+
+But everything the index already knows is static data, and a static host serves
+that for nothing, forever. `npm run build:static` bakes the committed snapshot
+into the bundle and the UI reads it directly. Browsing, search, duplicates and
+the page maps all work; anything that crawls or writes returns the same
+structured 501 the tool already uses for gated features.
+
+Embeddings are deliberately not shipped: 2,651KB of the 2,899KB snapshot is
+384-float vectors a browser cannot use without the model. Without them the whole
+payload is 117KB gzipped. Semantic search is therefore **absent and labelled**
+rather than silently degraded — the search-index endpoint reports zero embedded,
+so the existing coverage notice explains itself.
+
+Every page carries a banner saying it is a snapshot. That is the same principle
+as pHash coverage and the three-day revalidation: a published snapshot is the
+largest version of the stale-answer problem, because it looks exactly like the
+working tool and the numbers stopped moving on a date nobody can see.

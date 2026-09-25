@@ -6,6 +6,10 @@ plus a public video intake flow with legal and marketing approval.
 Built to PRD v1.5. See [`PRD.md`](./PRD.md) and the conventions in
 [`.claude/rules/`](./.claude/rules/).
 
+> **Picking this up from someone else?** Start with
+> [**HANDOFF.md**](./HANDOFF.md) — what it is, how to run it in ten minutes,
+> what it found, what IT still owes it, and what hosting costs.
+
 > **Status: running and verified locally.** Type-checks clean, 218 tests pass,
 > and a real audit has scraped live capella.edu pages end to end. See
 > [What has actually been verified](#what-has-actually-been-verified) for the

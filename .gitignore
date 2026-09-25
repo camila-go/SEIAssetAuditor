@@ -4,6 +4,8 @@ dist/
 # generated files were committed in the initial import and re-churned on every
 # build.
 dist-types/
+# Generated from the committed snapshot by scripts/build-static-data.mjs.
+apps/ui/public/data/
 # Mirror written by scripts/build-ui.mjs when a host starts the build inside a
 # workspace instead of at the repo root.
 apps/*/apps/
